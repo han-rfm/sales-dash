@@ -29,6 +29,13 @@ textarea{min-height:70px;resize:vertical;}
 .choice-opt{display:flex;align-items:center;gap:8px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;cursor:pointer;font-size:13.5px;}
 .choice-opt input{width:auto;}
 .privacy-banner{background:#fff6e5;border:1px solid #f3d99a;color:#8a5a00;font-size:11.5px;border-radius:8px;padding:8px 10px;margin-bottom:14px;line-height:1.5;}
+.consent-box{background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:20px 18px;}
+.consent-box h2{font-size:16px;margin-bottom:14px;}
+.consent-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:16px;}
+.consent-table th{width:84px;text-align:left;color:var(--muted);font-weight:600;vertical-align:top;padding:8px 8px 8px 0;border-bottom:1px solid var(--bd);}
+.consent-table td{padding:8px 0;border-bottom:1px solid var(--bd);line-height:1.55;}
+.consent-check{display:flex;align-items:flex-start;gap:8px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:12px;font-size:12.5px;line-height:1.5;cursor:pointer;margin-bottom:14px;}
+.consent-check input{width:auto;margin-top:2px;flex-shrink:0;}
 .submit-btn{width:100%;padding:14px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-size:15px;font-weight:700;cursor:pointer;margin-top:6px;}
 .submit-btn:disabled{opacity:0.5;}
 .empty-state,.done-state{text-align:center;padding:60px 20px;color:var(--muted);}
@@ -41,6 +48,27 @@ textarea{min-height:70px;resize:vertical;}
 
 <div class="wrap">
   <div id="loading">불러오는 중...</div>
+  <div id="consent" style="display:none;">
+    <div class="header">
+      <h1>🎯 eFSR 프로파일링 서베이</h1>
+      <p id="consent-greeting"></p>
+    </div>
+    <div class="consent-box">
+      <h2>🔒 개인정보 수집·이용 동의</h2>
+      <table class="consent-table">
+        <tr><th>수집 목적</th><td>eFSR 활동 지원 및 맞춤 코칭을 위한 Success Wheel 진단, 조직 운영 통계 분석</td></tr>
+        <tr><th>수집 항목</th><td>전문직 경력·활동 관련 정보, 업무환경·컨디션·커리어에 대한 자기평가 응답</td></tr>
+        <tr><th>보유·이용 기간</th><td>위촉 관계 종료 시 또는 수집 목적 달성 시까지 (본인 요청 시 삭제 가능)</td></tr>
+        <tr><th>동의 거부</th><td>동의를 거부할 권리가 있으며, 거부 시 서베이 참여가 제한될 수 있으나 그 외 불이익은 없습니다.</td></tr>
+      </table>
+      <p style="font-size:11.5px;color:var(--muted);margin-bottom:14px;line-height:1.5;">※ 일부 항목(업무환경·컨디션·커리어 관련)은 본사 담당자만 열람하며, 담당 AM/MD에게는 공유되지 않습니다.</p>
+      <label class="consent-check">
+        <input type="checkbox" id="consent-checkbox" onchange="document.getElementById('consent-btn').disabled=!this.checked;">
+        <span>위 내용을 확인했으며, 개인정보 수집·이용에 동의합니다.</span>
+      </label>
+      <button class="submit-btn" id="consent-btn" disabled onclick="proceedAfterConsent()">동의하고 시작하기</button>
+    </div>
+  </div>
   <div id="content" style="display:none;">
     <div class="header">
       <h1>🎯 eFSR 프로파일링 서베이</h1>
@@ -70,6 +98,7 @@ function getParam(name){
 var empId = getParam('id');
 var template = null;
 var personName = '';
+var consentAgreedAt = null;
 
 function init(){
   if(!empId){ showNotFound(); return; }
@@ -82,12 +111,22 @@ function init(){
     template = res[1];
     if(!person || !template){ showNotFound(); return; }
     personName = person.name || '';
-    document.getElementById('greeting').textContent = personName + '님, 아래 항목을 편하게 작성해주세요.'
+    var greetingText = personName + '님, 아래 항목을 편하게 작성해주세요.'
       + (isTest ? ' (🧪 테스트 모드 — 제출해도 실제 담당자 명단·통계에는 반영되지 않아요)' : '');
+    document.getElementById('greeting').textContent = greetingText;
+    document.getElementById('consent-greeting').textContent = personName + '님, 서베이 시작 전에 아래 내용을 확인해주세요.';
     renderForm(template);
     document.getElementById('loading').style.display='none';
-    document.getElementById('content').style.display='block';
+    document.getElementById('consent').style.display='block';
   }).catch(function(e){ console.error(e); showNotFound(); });
+}
+function proceedAfterConsent(){
+  var chk = document.getElementById('consent-checkbox');
+  if(!chk || !chk.checked) return;
+  consentAgreedAt = new Date().toISOString();
+  document.getElementById('consent').style.display='none';
+  document.getElementById('content').style.display='block';
+  window.scrollTo(0,0);
 }
 function showNotFound(){
   document.getElementById('loading').style.display='none';
@@ -166,7 +205,7 @@ function submitSurvey(){
   btn.textContent = '제출 중...';
   var id = 'r'+Date.now();
   var now = new Date();
-  var entry = { submittedAt: now.toISOString(), sections: sections };
+  var entry = { submittedAt: now.toISOString(), consentAgreedAt: consentAgreedAt, sections: sections };
   var yyyymm = now.getFullYear() + String(now.getMonth()+1).padStart(2,'0');
   var savePromises = [
     fetch(FB_URL+ROOT+'/surveyResponses/'+empId+'/'+id+'.json', {
