@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>eFSR 서베이</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#ffffff;--sf:#f7f8fa;--sf2:#eef0f4;
+  --bd:#dde1e8;--accent:#4361ee;
+  --text:#1a1a1a;--muted:#6b7280;--danger:#e0294b;--good:#0f9d67;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
+input,select,textarea{font-size:16px !important;}
+.wrap{max-width:560px;margin:0 auto;padding:24px 16px 80px;}
+.header{text-align:center;margin-bottom:24px;}
+.header h1{font-size:18px;margin-bottom:6px;}
+.header p{font-size:13px;color:var(--muted);}
+.card{background:var(--sf);border:1px solid var(--bd);border-radius:14px;padding:18px;margin-bottom:16px;}
+.sec-title{font-size:14px;font-weight:700;color:var(--accent);margin-bottom:14px;}
+.field{margin-bottom:16px;}
+.field label{display:block;font-size:13px;font-weight:500;margin-bottom:6px;line-height:1.4;}
+textarea,input[type=text]{width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;color:var(--text);outline:none;font-family:inherit;}
+textarea:focus,input:focus{border-color:var(--accent);}
+textarea{min-height:70px;resize:vertical;}
+.choice-group{display:flex;flex-direction:column;gap:8px;}
+.choice-opt{display:flex;align-items:center;gap:8px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:10px 12px;cursor:pointer;font-size:13.5px;}
+.choice-opt input{width:auto;}
+.privacy-banner{background:#fff6e5;border:1px solid #f3d99a;color:#8a5a00;font-size:11.5px;border-radius:8px;padding:8px 10px;margin-bottom:14px;line-height:1.5;}
+.submit-btn{width:100%;padding:14px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-size:15px;font-weight:700;cursor:pointer;margin-top:6px;}
+.submit-btn:disabled{opacity:0.5;}
+.empty-state,.done-state{text-align:center;padding:60px 20px;color:var(--muted);}
+.done-state h2{color:var(--text);font-size:18px;margin-bottom:8px;}
+.err{color:var(--danger);font-size:13px;text-align:center;margin-top:10px;min-height:16px;}
+#loading{text-align:center;padding:60px 20px;color:var(--muted);}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div id="loading">불러오는 중...</div>
+  <div id="content" style="display:none;">
+    <div class="header">
+      <h1>🎯 eFSR 프로파일링 서베이</h1>
+      <p id="greeting"></p>
+    </div>
+    <div id="sections"></div>
+    <button class="submit-btn" id="submit-btn" onclick="submitSurvey()">제출하기</button>
+    <div class="err" id="err-msg"></div>
+  </div>
+  <div id="done" class="done-state" style="display:none;">
+    <h2>✅ 제출이 완료됐어요</h2>
+    <p id="done-msg">소중한 시간 내주셔서 감사합니다.</p>
+  </div>
+  <div id="not-found" class="empty-state" style="display:none;">
+    <p>유효하지 않은 링크예요. 담당자에게 다시 문의해주세요.</p>
+  </div>
+</div>
+
+<script>
+var FB_URL = 'https://cleaning-498705-default-rtdb.asia-southeast1.firebasedatabase.app';
+var ROOT = '/salesData';
+
+function getParam(name){
+  var params = new URLSearchParams(location.search);
+  return params.get(name);
+}
+var empId = getParam('id');
+var template = null;
+var personName = '';
+
+function init(){
+  if(!empId){ showNotFound(); return; }
+  var isTest = empId === 'test';
+  Promise.all([
+    isTest ? Promise.resolve({name:'테스트'}) : fetch(FB_URL+ROOT+'/people/'+empId+'.json').then(function(r){return r.json();}),
+    fetch(FB_URL+ROOT+'/surveyTemplate.json').then(function(r){return r.json();})
+  ]).then(function(res){
+    var person = res[0];
+    template = res[1];
+    if(!person || !template){ showNotFound(); return; }
+    personName = person.name || '';
+    document.getElementById('greeting').textContent = personName + '님, 아래 항목을 편하게 작성해주세요.'
+      + (isTest ? ' (🧪 테스트 모드 — 제출해도 실제 담당자 명단·통계에는 반영되지 않아요)' : '');
+    renderForm(template);
+    document.getElementById('loading').style.display='none';
+    document.getElementById('content').style.display='block';
+  }).catch(function(e){ console.error(e); showNotFound(); });
+}
+function showNotFound(){
+  document.getElementById('loading').style.display='none';
+  document.getElementById('not-found').style.display='block';
+}
+var SCALE_OPTIONS = ['매우 그렇다','그렇다','보통이다','그렇지 않다','전혀 그렇지 않다'];
+function renderForm(tmpl){
+  var el = document.getElementById('sections');
+  el.innerHTML = tmpl.sections.map(function(sec){
+    var fieldsHtml = sec.fields.map(function(f){
+      if(f.type==='choice'){
+        var opts = (f.options||[]).map(function(o){
+          return '<label class="choice-opt"><input type="radio" name="'+f.id+'" value="'+o.replace(/"/g,'&quot;')+'"> '+o+'</label>';
+        }).join('');
+        return '<div class="field" data-field-id="'+f.id+'" data-type="choice"><label>'+f.label+'</label><div class="choice-group">'+opts+'</div></div>';
+      }
+      if(f.type==='multichoice'){
+        var mopts = (f.options||[]).map(function(o){
+          return '<label class="choice-opt"><input type="checkbox" name="'+f.id+'" value="'+o.replace(/"/g,'&quot;')+'"> '+o+'</label>';
+        }).join('');
+        return '<div class="field" data-field-id="'+f.id+'" data-type="multichoice"><label>'+f.label+'</label><div class="choice-group">'+mopts+'</div></div>';
+      }
+      if(f.type==='scale'){
+        var sopts = SCALE_OPTIONS.map(function(o){
+          return '<label class="choice-opt"><input type="radio" name="'+f.id+'" value="'+o+'"> '+o+'</label>';
+        }).join('');
+        return '<div class="field" data-field-id="'+f.id+'" data-type="scale"><label>'+f.label+'</label><div class="choice-group">'+sopts+'</div></div>';
+      }
+      return '<div class="field" data-field-id="'+f.id+'" data-type="text"><label>'+f.label+'</label><textarea placeholder="답변을 입력해주세요"></textarea></div>';
+    }).join('');
+    var privacyBanner = sec.visibility==='private'
+      ? '<div class="privacy-banner">🔒 이 항목은 담당 AM/MD에게 공유되지 않으며, 본사에서만 확인합니다. 편하게 솔직히 답해주세요.</div>'
+      : '';
+    return '<div class="card" data-sec-id="'+sec.id+'" data-sec-title="'+sec.title.replace(/"/g,'&quot;')+'"><div class="sec-title">'+sec.title+'</div>'+privacyBanner+fieldsHtml+'</div>';
+  }).join('');
+}
+function scaleScoreOf(value, reverseScored){
+  var idx = SCALE_OPTIONS.indexOf(value);
+  if(idx<0) return null;
+  var forward = 5 - idx; // 매우그렇다(0)->5 ... 전혀그렇지않다(4)->1
+  return reverseScored ? (6 - forward) : forward;
+}
+function submitSurvey(){
+  var btn = document.getElementById('submit-btn');
+  var errEl = document.getElementById('err-msg');
+  errEl.textContent = '';
+  var sections = [];
+  var scaleScores = {}; // fieldId -> 1~5 점수 (역채점 반영 완료)
+  template.sections.forEach(function(sec){
+    var secEl = document.querySelector('[data-sec-id="'+sec.id+'"]');
+    if(!secEl) return;
+    var items = [];
+    sec.fields.forEach(function(f){
+      var fEl = secEl.querySelector('[data-field-id="'+f.id+'"]');
+      if(!fEl) return;
+      var value = '';
+      if(f.type==='choice' || f.type==='scale'){
+        var checked = fEl.querySelector('input[type=radio]:checked');
+        value = checked ? checked.value : '';
+      } else if(f.type==='multichoice'){
+        var checkedBoxes = fEl.querySelectorAll('input[type=checkbox]:checked');
+        value = Array.prototype.map.call(checkedBoxes, function(c){ return c.value; }).join(', ');
+      } else {
+        var ta = fEl.querySelector('textarea');
+        value = ta ? ta.value.trim() : '';
+      }
+      items.push({label:f.label, value:value});
+      if(f.type==='scale' && value){
+        var s = scaleScoreOf(value, f.reverseScored);
+        if(s!==null) scaleScores[f.id] = s;
+      }
+    });
+    sections.push({title: sec.title, items: items});
+  });
+  btn.disabled = true;
+  btn.textContent = '제출 중...';
+  var id = 'r'+Date.now();
+  var now = new Date();
+  var entry = { submittedAt: now.toISOString(), sections: sections };
+  var yyyymm = now.getFullYear() + String(now.getMonth()+1).padStart(2,'0');
+  var savePromises = [
+    fetch(FB_URL+ROOT+'/surveyResponses/'+empId+'/'+id+'.json', {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(entry)
+    })
+  ];
+  if(Object.keys(scaleScores).length){
+    scaleScores.submittedAt = now.toISOString();
+    savePromises.push(
+      fetch(FB_URL+ROOT+'/surveyScoreSnapshots/'+yyyymm+'/'+empId+'.json', {
+        method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(scaleScores)
+      })
+    );
+  }
+  Promise.all(savePromises).then(function(results){
+    if(!results[0].ok) throw new Error('저장 실패');
+    var doneMsg = document.getElementById('done-msg');
+    if(doneMsg) doneMsg.textContent = (empId==='test')
+      ? '🧪 테스트 제출이에요. 구성·문항이 잘 나오는지 확인용이니 실제 담당자 명단에는 영향 없어요.'
+      : '소중한 시간 내주셔서 감사합니다.';
+    document.getElementById('content').style.display='none';
+    document.getElementById('done').style.display='block';
+  }).catch(function(e){
+    errEl.textContent = '제출 중 오류가 발생했어요. 다시 시도해주세요.';
+    btn.disabled = false;
+    btn.textContent = '제출하기';
+  });
+}
+init();
+</script>
+</body>
+</html>
