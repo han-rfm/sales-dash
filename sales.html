@@ -523,6 +523,8 @@ var SOLAPI_FROM = '01092925782'; // 세일즈 전용 발신번호 (청소앱은 
 var ROOT = '/salesData';
 
 var people = {};      // empId -> latest profile
+function isActivePerson(id){ return !(people[id] && people[id].terminated); }
+function activePeopleIds(){ return Object.keys(people).filter(isActivePerson); }
 var snapshots = {};   // yyyymm -> { empId: {...} }
 var notes = {};       // empId -> { noteId: {...} }
 var contacts = {};    // empId -> { logId: {...} }
@@ -978,8 +980,9 @@ function renderDashboard(){
 
   // 조직별(본부/지점) 위험군 현황
   renderRiskOrgList();
-  renderWeeklyRoutine(ids);
-  renderInterventionRoutine(ids);
+  var activeIds = activePeopleIds();
+  renderWeeklyRoutine(activeIds);
+  renderInterventionRoutine(activeIds);
   populateHqReportSelect();
   renderCampaignEffectChart();
 
@@ -1055,7 +1058,7 @@ function renderWeeklyRoutine(ids){
     + section('contactOverdue', '⏰', '컨택주기('+cycle+'일) 초과자', g.contactOverdue, 'var(--danger)');
 }
 function startRoutineGroupSms(key){
-  var ids = Object.keys(people);
+  var ids = activePeopleIds();
   var g = computeRoutineGroups(ids);
   var targetIds, label, message;
   if(key==='goal'){
@@ -1221,7 +1224,7 @@ function renderInterventionRoutine(ids){
 }
 /* ---------- 본부장 월간 리포트 (엑셀) — 지점·FSR별 정리, 원본 척도점수는 노출 안 함(신호만 표시) ---------- */
 function buildHqReportRows(hqName){
-  var ids = Object.keys(people).filter(function(id){ return people[id].hq===hqName; });
+  var ids = Object.keys(people).filter(function(id){ return people[id].hq===hqName && isActivePerson(id); });
   var g = computeInterventionGroups(ids);
   var setOf = function(list){ var s={}; list.forEach(function(id){ s[id]=true; }); return s; };
   var leavingSet = setOf(g.leaving), burnoutSet = setOf(g.burnout), roleSet = setOf(g.role), recogSet = setOf(g.recognition);
@@ -1310,7 +1313,7 @@ function exportHqMonthlyReportExcel(){
   XLSX.writeFile(wb, '본부장월간리포트_'+now.getFullYear()+pad2(now.getMonth()+1)+pad2(now.getDate())+'.xlsx');
 }
 function startInterventionGroupSms(key){
-  var ids = Object.keys(people);
+  var ids = activePeopleIds();
   var g = computeInterventionGroups(ids);
   var labels = appConfig.interventionLabels || DEFAULT_INTERVENTION_CONFIG.interventionLabels;
   var targetIds, label, message;
@@ -1330,7 +1333,7 @@ function startInterventionGroupSms(key){
   openGroupSmsModal(targetIds, label, message);
 }
 function startCauseGroupSms(cause){
-  var ids = Object.keys(people);
+  var ids = activePeopleIds();
   var g = computeInterventionGroups(ids);
   var targetIds = g.causeGroups[cause] || [];
   var message = '안녕하세요, "'+cause+'" 관련해서 도움드릴 방법을 고민하고 있어요. 편하실 때 통화 가능하실까요?';
@@ -2398,7 +2401,13 @@ function buildProfileHtml(empId, p){
 
   var leftCol = '<div style="margin-bottom:10px;">'+trendBadgeHtml(empId)+'</div>'
   + buildContactDueBadge(empId)
+  + (p.terminated ? '<div class="badge" style="background:#fdeaee;color:var(--danger);border:1px solid #f2b8c6;margin-bottom:10px;display:inline-block;">🚫 해촉 처리됨'+(p.terminatedAt?' ('+fmtDate8(p.terminatedAt)+')':'')+' — 서베이·Reach 대상에서 자동 제외돼요</div>' : '')
   +'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;" id="tags-'+empId+'">'+renderTagsHtml(empId)+'</div>'
+  + '<div style="margin-bottom:10px;">'
+    + '<span class="badge" style="cursor:pointer;border:1px dashed '+(p.terminated?'var(--good)':'var(--danger)')+';color:'+(p.terminated?'var(--good)':'var(--danger)')+';" onclick="toggleTerminated(\''+empId+'\')">'
+      + (p.terminated ? '↩ 해촉 취소(복귀 처리)' : '🚫 해촉 처리하기')
+    + '</span>'
+  + '</div>'
   +'<table class="info-table">'
     +'<tr><td class="k">사번</td><td>'+(p.empId||empId)+'</td><td class="k">담당FM</td><td>'+fmContactHtml(p.fm)+'</td></tr>'
     +'<tr><td class="k">담당AM</td><td>'+omContactHtml(orgMap.branch[p.branch])+'</td><td class="k">담당MD</td><td>'+omContactHtml(orgMap.hq[p.hq])+'</td></tr>'
@@ -2821,6 +2830,25 @@ function toggleFav(empId){
   document.querySelector('.modal-overlay').remove();
   openProfile(empId);
   renderDashboard();
+}
+function toggleTerminated(empId){
+  var p = people[empId];
+  var willTerminate = !p.terminated;
+  var msg = willTerminate
+    ? (p.name+'님을 해촉 처리할까요?\n\n해촉 처리하면 서베이 발송, 이달의 추천 액션, 상시 체크 루틴 등 모든 Reach 대상에서 자동 제외돼요.\n프로필 데이터는 그대로 남아있고, 언제든 "복귀 처리"로 되돌릴 수 있어요.')
+    : (p.name+'님을 다시 활성 인원으로 되돌릴까요? (해촉 취소)\n\n이후 서베이·Reach 대상에 다시 포함돼요.');
+  if(!confirm(msg)) return;
+  p.terminated = willTerminate;
+  var patch = { terminated: willTerminate };
+  if(willTerminate){
+    var now = new Date();
+    p.terminatedAt = now.getFullYear()+pad2(now.getMonth()+1)+pad2(now.getDate());
+    patch.terminatedAt = p.terminatedAt;
+  }
+  fetch(FB_URL+ROOT+'/people/'+empId+'.json',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
+  openProfile(empId);
+  renderDashboard();
+  showToast(willTerminate ? '해촉 처리됐어요.' : '해촉이 취소됐어요.');
 }
 function daysSinceLastContact(empId){
   var lastNote = latestNoteDate(empId);
