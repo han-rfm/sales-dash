@@ -161,22 +161,35 @@ tr.row-clickable:hover{background:var(--sf2);}
         <div class="stat-card danger clickable" onclick="showStatDetail('out')"><div class="stat-label">이번달 해촉</div><div class="stat-val" id="d-out">-</div></div>
       </div>
 
-      <div class="card">
-        <div class="card-title">🔁 상시 체크 루틴 (Success Wheel Quick Win)</div>
-        <p style="font-size:11px;color:var(--muted);margin-bottom:12px;">한 주에 한 번이 아니라, 한 달 내내 수시로 확인하고 필요할 때마다 보내는 리스트예요. TIP은 새 영상 나올 때마다, esMAP·S/W는 편하실 때 체크해서 보내세요.</p>
-        <div id="weekly-routine-list"></div>
+      <div class="grid-2" style="margin-bottom:16px;">
+        <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;">
+          <div class="card-title" style="font-size:13.5px;margin-bottom:6px;">📅 오늘 Reach 일정</div>
+          <div id="today-schedule" style="flex:1;max-height:210px;overflow-y:auto;"><div class="empty">일정이 없어요.</div></div>
+        </div>
+        <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;">
+          <div class="card-title" style="font-size:13.5px;margin-bottom:6px;" id="next-schedule-title">⏭ 다음 Reach 일정</div>
+          <div id="next-schedule" style="flex:1;max-height:210px;overflow-y:auto;"><div class="empty">예정된 일정이 없어요.</div></div>
+        </div>
       </div>
 
-      <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;flex-wrap:wrap;gap:6px;">
-          <div class="card-title" style="margin:0;">🎯 이달의 추천 액션</div>
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-            <select id="hq-report-select" style="width:auto;font-size:12px;padding:6px 8px;"></select>
-            <button class="btn" style="font-size:11px;padding:6px 10px;" onclick="exportHqMonthlyReportExcel()">📥 본부장 리포트(엑셀)</button>
-          </div>
+      <div class="grid-2">
+        <div class="card" style="display:flex;flex-direction:column;">
+          <div class="card-title">🔁 상시 체크 루틴 (Success Wheel Quick Win)</div>
+          <p style="font-size:11px;color:var(--muted);margin-bottom:12px;">한 주에 한 번이 아니라, 한 달 내내 수시로 확인하고 필요할 때마다 보내는 리스트예요. TIP은 새 영상 나올 때마다, esMAP·S/W는 편하실 때 체크해서 보내세요.</p>
+          <div id="weekly-routine-list" style="flex:1;"></div>
         </div>
-        <p style="font-size:11px;color:var(--muted);margin-bottom:12px;">서베이 척도(5점 만점, 낮을수록 챙겨야 할 신호) 기반으로 자동 추출돼요. 이름·기준은 설정 탭에서 자유롭게 바꿀 수 있어요.</p>
-        <div id="intervention-routine-list"></div>
+
+        <div class="card" style="display:flex;flex-direction:column;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;flex-wrap:wrap;gap:6px;">
+            <div class="card-title" style="margin:0;">🎯 이달의 추천 액션</div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <select id="hq-report-select" style="width:auto;font-size:12px;padding:6px 8px;"></select>
+              <button class="btn" style="font-size:11px;padding:6px 10px;" onclick="exportHqMonthlyReportExcel()">📥 본부장 리포트(엑셀)</button>
+            </div>
+          </div>
+          <p style="font-size:11px;color:var(--muted);margin-bottom:12px;">서베이 척도(5점 만점, 낮을수록 챙겨야 할 신호) 기반으로 자동 추출돼요. 이름·기준은 설정 탭에서 자유롭게 바꿀 수 있어요.</p>
+          <div id="intervention-routine-list" style="flex:1;"></div>
+        </div>
       </div>
 
       <div class="card">
@@ -223,28 +236,22 @@ tr.row-clickable:hover{background:var(--sf2);}
         <div style="font-size:12px;color:var(--muted);margin-top:8px;" id="survey-rate-label">-</div>
       </div>
 
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-title">📅 오늘 컨택 일정</div>
-          <div id="today-schedule"><div class="empty">일정이 없어요.</div></div>
-        </div>
-        <div class="card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:6px;">
-            <div class="card-title" style="margin:0;">📊 조직별 지표 변화 현황</div>
-            <div style="display:flex;gap:6px;">
-              <select id="risk-org-type" onchange="renderRiskOrgList()" style="width:auto;font-size:12px;padding:6px 10px;">
-                <option value="improved">📈 지표상승인원</option>
-                <option value="declined">📉 지표하락인원</option>
-                <option value="vsH1">🌟 상반기 대비 향상</option>
-              </select>
-              <select id="risk-org-level" onchange="renderRiskOrgList()" style="width:auto;font-size:12px;padding:6px 10px;">
-                <option value="hq">본부별</option>
-                <option value="branch">지점별</option>
-              </select>
-            </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:6px;">
+          <div class="card-title" style="margin:0;">📊 조직별 지표 변화 현황</div>
+          <div style="display:flex;gap:6px;">
+            <select id="risk-org-type" onchange="renderRiskOrgList()" style="width:auto;font-size:12px;padding:6px 10px;">
+              <option value="improved">📈 지표상승인원</option>
+              <option value="declined">📉 지표하락인원</option>
+              <option value="vsH1">🌟 상반기 대비 향상</option>
+            </select>
+            <select id="risk-org-level" onchange="renderRiskOrgList()" style="width:auto;font-size:12px;padding:6px 10px;">
+              <option value="hq">본부별</option>
+              <option value="branch">지점별</option>
+            </select>
           </div>
-          <div id="risk-org-list"><div class="empty">-</div></div>
         </div>
+        <div id="risk-org-list"><div class="empty">-</div></div>
       </div>
 
       <div class="card">
@@ -305,6 +312,7 @@ tr.row-clickable:hover{background:var(--sf2);}
           <option value="vsH1">🌟 상반기 대비 향상</option>
         </select>
         <button class="btn" onclick="exportOrgListExcel()">📥 엑셀 다운로드</button>
+        <button class="btn" onclick="openMgrReachModal()">👔 MGR Reach</button>
         <button class="btn primary" onclick="openGroupSmsModal(getOrgRows().map(function(r){return r.id;}), '현재 화면에 보이는 대상자')">🚀 Reach</button>
       </div>
       <div style="overflow-x:auto;">
@@ -845,6 +853,23 @@ function branchColor(branch){
 var segColorMap = { A:'#639922', B:'#97C459', C:'#EF9F27', D:'#D85A30', E:'#E24B4A' };
 
 /* ---------- DASHBOARD ---------- */
+function renderScheduleListInto(elId, list, emptyText){
+  var el = document.getElementById(elId);
+  if(!el) return;
+  if(!list.length){ el.innerHTML='<div class="empty">'+emptyText+'</div>'; return; }
+  el.innerHTML = list.map(function(s){
+    var p = s.empId ? (people[s.empId]||{}) : null;
+    var t = s.type||'컨택';
+    var clickAttr = s.empId ? " onclick=\"openProfile('"+s.empId+"')\" style=\"padding:7px 0;border-bottom:1px solid var(--bd);cursor:pointer;\"" : " style=\"padding:7px 0;border-bottom:1px solid var(--bd);\"";
+    return '<div'+clickAttr+'>'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;">'
+      +'<div style="font-size:13px;">'+(s.time?'<span style="color:var(--muted);font-size:11px;margin-right:4px;">'+s.time+'</span>':'')+'<span class="badge" style="background:'+(TYPE_COLORS[t]||TYPE_COLORS.ETC)+'22;color:'+(TYPE_COLORS[t]||TYPE_COLORS.ETC)+';">'+t+'</span> '+(p?(p.name||'?'):'(대상자 없음)')+' <span style="font-size:11px;color:var(--muted);">'+(p&&p.branch?'· '+p.branch:'')+'</span></div>'
+      + (p?'<span style="color:var(--muted);font-size:13px;">›</span>':'')
+      +'</div>'
+      + (s.location?'<div style="font-size:11px;color:var(--accent);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📍 '+s.location+'</div>':'')
+      +'<div style="font-size:11px;color:var(--muted);margin-top:3px;overflow-wrap:break-word;">'+(s.memo||'')+'</div></div>';
+  }).join('');
+}
 function renderDashboard(){
   var ids = Object.keys(people);
   document.getElementById('d-total').textContent = ids.length;
@@ -899,21 +924,25 @@ function renderDashboard(){
   var todayStr = now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate());
   var todayList = getSchedulesForDate(todayStr);
   todayList.sort(function(a,b){ return (a.time||'99:99').localeCompare(b.time||'99:99'); });
-  var tsEl = document.getElementById('today-schedule');
-  if(!todayList.length){ tsEl.innerHTML='<div class="empty">일정이 없어요.</div>'; }
-  else {
-    tsEl.innerHTML = todayList.map(function(s){
-      var p = s.empId ? (people[s.empId]||{}) : null;
-      var t = s.type||'컨택';
-      var clickAttr = s.empId ? " onclick=\"openProfile('"+s.empId+"')\" style=\"padding:7px 0;border-bottom:1px solid var(--bd);cursor:pointer;\"" : " style=\"padding:7px 0;border-bottom:1px solid var(--bd);\"";
-      return '<div'+clickAttr+'>'
-        +'<div style="display:flex;justify-content:space-between;align-items:center;">'
-        +'<div style="font-size:13px;">'+(s.time?'<span style="color:var(--muted);font-size:11px;margin-right:4px;">'+s.time+'</span>':'')+'<span class="badge" style="background:'+(TYPE_COLORS[t]||TYPE_COLORS.ETC)+'22;color:'+(TYPE_COLORS[t]||TYPE_COLORS.ETC)+';">'+t+'</span> '+(p?(p.name||'?'):'(대상자 없음)')+' <span style="font-size:11px;color:var(--muted);">'+(p&&p.branch?'· '+p.branch:'')+'</span></div>'
-        + (p?'<span style="color:var(--muted);font-size:13px;">›</span>':'')
-        +'</div>'
-        + (s.location?'<div style="font-size:11px;color:var(--accent);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">📍 '+s.location+'</div>':'')
-        +'<div style="font-size:11px;color:var(--muted);margin-top:3px;overflow-wrap:break-word;">'+(s.memo||'')+'</div></div>';
-    }).join('');
+  renderScheduleListInto('today-schedule', todayList, '일정이 없어요.');
+
+  // 다음 Reach 일정 — 오늘 이후 가장 가까운, 일정이 있는 날짜를 찾아서 표시
+  var nextTitleEl = document.getElementById('next-schedule-title');
+  var found = null;
+  for(var i=1;i<=60;i++){
+    var d = new Date(now); d.setDate(now.getDate()+i);
+    var dStr = d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+    var list = getSchedulesForDate(dStr);
+    if(list.length){ found = {dateStr:dStr, date:d, list:list}; break; }
+  }
+  if(found){
+    found.list.sort(function(a,b){ return (a.time||'99:99').localeCompare(b.time||'99:99'); });
+    var wd = ['일','월','화','수','목','금','토'][found.date.getDay()];
+    if(nextTitleEl) nextTitleEl.textContent = '⏭ 다음 Reach 일정 ('+(found.date.getMonth()+1)+'/'+found.date.getDate()+' '+wd+')';
+    renderScheduleListInto('next-schedule', found.list, '예정된 일정이 없어요.');
+  } else {
+    if(nextTitleEl) nextTitleEl.textContent = '⏭ 다음 Reach 일정';
+    renderScheduleListInto('next-schedule', [], '앞으로 60일 내 예정된 일정이 없어요.');
   }
 
   // 즐겨찾기
@@ -973,7 +1002,28 @@ function computeRoutineGroups(ids){
   var cutoffIdx = Math.floor(swVals.length*0.3);
   var swCutoff = swVals.length ? swVals[Math.max(0,cutoffIdx-1)] : null;
   var swLow = swCutoff===null ? [] : ids.filter(function(id){ var v=people[id].sw; var n=(v!==undefined&&v!==null&&v!=='')?Number(v):null; return n!==null && !isNaN(n) && n<=swCutoff; });
-  return { esmapLow:esmapLow, tipLow:tipLow, swLow:swLow };
+  // 이번 달 서베이 미제출자
+  var surveyMissing = ids.filter(function(id){ return !(surveyResponses[id] && Object.keys(surveyResponses[id]).length>0); });
+  // 이번 주(7일 이내, 월 경계 넘어가도 OK) 생일자
+  var now = new Date();
+  var birthdayThisWeek = ids.filter(function(id){
+    var b = people[id].birth;
+    if(!b || String(b).length<8) return false;
+    var mm = Number(String(b).slice(4,6)), dd = Number(String(b).slice(6,8));
+    if(!mm || !dd) return false;
+    for(var i=0;i<7;i++){
+      var d = new Date(now); d.setDate(now.getDate()+i);
+      if(d.getMonth()+1===mm && d.getDate()===dd) return true;
+    }
+    return false;
+  });
+  // 컨택주기(설정값) 초과자
+  var cycle = appConfig.contactCycleDays||90;
+  var contactOverdue = ids.filter(function(id){
+    var days = daysSinceLastContact(id);
+    return days===null || days>=cycle;
+  });
+  return { esmapLow:esmapLow, tipLow:tipLow, swLow:swLow, surveyMissing:surveyMissing, birthdayThisWeek:birthdayThisWeek, contactOverdue:contactOverdue };
 }
 function renderWeeklyRoutine(ids){
   var el = document.getElementById('weekly-routine-list');
@@ -981,6 +1031,7 @@ function renderWeeklyRoutine(ids){
   var g = computeRoutineGroups(ids);
   var esmapTh = appConfig.esmapThreshold!==undefined ? appConfig.esmapThreshold : 5;
   var tipTh = appConfig.tipThreshold!==undefined ? appConfig.tipThreshold : 3;
+  var cycle = appConfig.contactCycleDays||90;
   function section(key, icon, label, list, color){
     var names = list.slice(0,4).map(function(id){ return people[id].name; }).join(', ') + (list.length>4?' 외 '+(list.length-4)+'명':'');
     return '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--bd);gap:10px;">'
@@ -995,7 +1046,10 @@ function renderWeeklyRoutine(ids){
     section('goal', '🎯', '이번달 목표수립 입력하기!', ids, 'var(--accent)')
     + section('esmap', '📶', 'esMAP 로그인 '+esmapTh+'회 미만', g.esmapLow, 'var(--danger)')
     + section('tip', '🎬', 'TIP 영상수료 '+tipTh+'건 미만', g.tipLow, 'var(--warn)')
-    + section('sw', '🎡', 'S/W 하위 30%', g.swLow, 'var(--danger)');
+    + section('sw', '🎡', 'S/W 하위 30%', g.swLow, 'var(--danger)')
+    + section('surveyMissing', '📋', '이번 달 서베이 미제출자', g.surveyMissing, 'var(--danger)')
+    + section('birthday', '🎂', '이번 주 생일자', g.birthdayThisWeek, 'var(--good)')
+    + section('contactOverdue', '⏰', '컨택주기('+cycle+'일) 초과자', g.contactOverdue, 'var(--danger)');
 }
 function startRoutineGroupSms(key){
   var ids = Object.keys(people);
@@ -1017,11 +1071,33 @@ function startRoutineGroupSms(key){
     } else {
       message = '안녕하세요, TIP 교육영상 이수가 Success Wheel 점수에 반영돼요. 편하실 때 시청 부탁드려요!\n(설정 탭에서 TIP 링크를 등록해두시면 다음부터는 여기 자동으로 채워져요)';
     }
+  } else if(key==='surveyMissing'){
+    sendSurveyMissingReminders(g.surveyMissing);
+    return;
+  } else if(key==='birthday'){
+    targetIds = g.birthdayThisWeek; label = '이번 주 생일자';
+    message = '생일 진심으로 축하드려요! 🎂 늘 애써주셔서 감사하고, 앞으로도 좋은 일만 가득하시길 바라요 :)';
+  } else if(key==='contactOverdue'){
+    targetIds = g.contactOverdue; label = '컨택주기 초과자';
+    message = '안녕하세요, 오랜만에 연락드려요! 요즘 어떻게 지내시는지 궁금해서요. 편하실 때 통화 가능하실까요?';
   } else {
     targetIds = g.swLow; label = 'S/W 하위 30%';
     message = '안녕하세요, 요즘 어떻게 지내시는지 궁금해서 연락드려요. 편하실 때 통화 가능하실까요?';
   }
   openGroupSmsModal(targetIds, label, message);
+}
+// 서베이 미제출자는 사람마다 링크(?id=empId)가 달라야 하므로 개인화 링크로 직접 발송
+function sendSurveyMissingReminders(ids){
+  var validIds = ids.filter(function(id){ return people[id] && people[id].phone; });
+  if(!validIds.length){ showToast('전화번호가 있는 미제출자가 없어요.'); return; }
+  var basePath = location.pathname.replace(/[^/]*$/, '');
+  var items = validIds.map(function(id){
+    var p = people[id];
+    var url = location.origin + basePath + 'survey.html?id=' + id;
+    var text = fillTemplate(appConfig.messageTemplates.surveyLink, {name:p.name, url:url});
+    return { id:id, name:p.name||'?', phone:p.phone, text:text };
+  });
+  openSendReviewModal(items, suggestCampaignTag('서베이미제출독려'));
 }
 /* ---------- 이달의 추천 액션 (서베이 척도 기반) ---------- */
 function latestScaleScoresFor(empId){
@@ -1864,6 +1940,110 @@ function suggestCampaignTag(label){
   var yyyymm = now.getFullYear() + String(now.getMonth()+1).padStart(2,'0');
   var clean = (label||'').replace(/[^\w가-힣]+/g, '');
   return (clean||'캠페인') + '_' + yyyymm;
+}
+/* ---------- MGR Reach: MD/AM/FM 전용 발송 ---------- */
+// 같은 전화번호가 여러 본부/지점에 중복 등록돼 있을 수 있어 전화번호 기준으로 합쳐서 1인 1건만 발송
+function buildMgrList(){
+  var byPhone = {};
+  Object.keys(orgMap.hq).forEach(function(hq){
+    var m = orgMap.hq[hq];
+    if(!m || !m.name || !m.phone) return;
+    var key = 'MD|'+m.phone;
+    if(!byPhone[key]) byPhone[key] = {role:'MD', name:m.name, phone:m.phone, orgs:[]};
+    byPhone[key].orgs.push(hq);
+  });
+  Object.keys(orgMap.branch).forEach(function(br){
+    var m = orgMap.branch[br];
+    if(!m || !m.name || !m.phone) return;
+    var key = 'AM|'+m.phone;
+    if(!byPhone[key]) byPhone[key] = {role:'AM', name:m.name, phone:m.phone, orgs:[]};
+    byPhone[key].orgs.push(br);
+  });
+  Object.keys(fmMap).forEach(function(fmName){
+    var m = fmMap[fmName];
+    if(!m || !m.phone) return;
+    var key = 'FM|'+m.phone;
+    if(!byPhone[key]) byPhone[key] = {role:'FM', name:fmName, phone:m.phone, orgs:[]};
+  });
+  return Object.keys(byPhone).map(function(k){ return byPhone[k]; });
+}
+function openMgrReachModal(){
+  var list = buildMgrList();
+  var overlay=document.createElement('div');
+  overlay.className='modal-overlay';
+  overlay.onclick=function(e){ if(e.target===overlay) overlay.remove(); };
+  var box=document.createElement('div');
+  box.className='modal-box'; box.style.position='relative'; box.style.maxWidth='480px';
+  function groupBlock(role, icon, label){
+    var items = list.filter(function(m){ return m.role===role; });
+    if(!items.length) return '<p style="font-size:11px;color:var(--muted);margin:6px 0;">'+icon+' '+label+' — 등록된 연락처가 없어요.</p>';
+    var rows = items.map(function(m, i){
+      var orgLabel = m.orgs && m.orgs.length ? ' <span style="color:var(--muted);font-size:10.5px;">('+m.orgs.join(', ')+')</span>' : '';
+      return '<label style="display:flex;align-items:center;gap:6px;padding:6px 8px;font-size:12.5px;background:var(--sf2);border-radius:6px;margin-bottom:3px;cursor:pointer;">'
+        +'<input type="checkbox" data-mgr-role="'+role+'" data-mgr-name="'+m.name.replace(/"/g,'&quot;')+'" data-mgr-phone="'+m.phone+'" checked style="width:auto;">'
+        + m.name + orgLabel
+      +'</label>';
+    }).join('');
+    return '<div style="margin-bottom:10px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
+        +'<span style="font-size:12.5px;font-weight:700;">'+icon+' '+label+' ('+items.length+'명)</span>'
+        +'<span style="display:flex;gap:6px;">'
+          +'<button class="btn" style="font-size:10.5px;padding:3px 8px;" onclick="mgrReachToggleRole(\''+role+'\',true)">전체선택</button>'
+          +'<button class="btn" style="font-size:10.5px;padding:3px 8px;" onclick="mgrReachToggleRole(\''+role+'\',false)">전체해제</button>'
+        +'</span>'
+      +'</div>'
+      +'<div style="max-height:130px;overflow-y:auto;border:1px solid var(--bd);border-radius:8px;padding:4px;">'+rows+'</div>'
+    +'</div>';
+  }
+  box.innerHTML = '<button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button>'
+    +'<div class="card-title">👔 MGR Reach</div>'
+    +'<p style="font-size:11px;color:var(--muted);margin-bottom:10px;">MD·AM·FM에게만 별도로 메시지를 보낼 수 있어요. 기본은 전체 체크, 필요 없는 분만 해제하세요.</p>'
+    + groupBlock('MD','🧑‍💼','담당 MD')
+    + groupBlock('AM','🧑‍💼','담당 AM')
+    + groupBlock('FM','🧑‍💼','FM')
+    +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">캠페인 태그</label>'
+    +'<input type="text" id="mgr-campaign-tag" value="'+suggestCampaignTag('MGR공지')+'" style="margin-bottom:10px;font-size:12.5px;">'
+    +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">메시지</label>'
+    +'<textarea id="mgr-text" rows="4" placeholder="보낼 문자 내용을 입력하세요"></textarea>'
+    +'<div style="display:flex;gap:6px;margin-top:10px;">'
+      +'<button class="btn" style="flex:1;" onclick="copyMgrReachNumbers()">번호만 복사</button>'
+      +'<button class="btn" style="flex:1;" onclick="copyMgrReachFull()">번호+내용 복사</button>'
+    +'</div>'
+    +'<button class="btn primary" style="width:100%;margin-top:8px;" onclick="sendMgrReachViaSolapi()">🚀 지금 바로 발송 (Solapi)</button>';
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+function mgrReachToggleRole(role, checked){
+  document.querySelectorAll('[data-mgr-role="'+role+'"]').forEach(function(chk){ chk.checked = checked; });
+}
+function getMgrReachChecked(){
+  return Array.from(document.querySelectorAll('[data-mgr-role]:checked')).map(function(chk){
+    return { name: chk.getAttribute('data-mgr-name'), phone: chk.getAttribute('data-mgr-phone') };
+  });
+}
+function copyMgrReachNumbers(){
+  var checked = getMgrReachChecked();
+  if(!checked.length){ showToast('대상자가 없어요.'); return; }
+  var nums = checked.map(function(m){return m.phone;});
+  navigator.clipboard.writeText(nums.join(', ')).then(function(){ showToast(nums.length+'명 번호 복사됐어요.'); });
+}
+function copyMgrReachFull(){
+  var checked = getMgrReachChecked();
+  if(!checked.length){ showToast('대상자가 없어요.'); return; }
+  var nums = checked.map(function(m){return m.phone;});
+  var text = document.getElementById('mgr-text').value;
+  navigator.clipboard.writeText('['+nums.length+'명]\n'+nums.join(', ')+'\n\n메시지:\n'+text).then(function(){ showToast('복사됐어요.'); });
+}
+function sendMgrReachViaSolapi(){
+  var checked = getMgrReachChecked();
+  var text = document.getElementById('mgr-text').value.trim();
+  var tagEl = document.getElementById('mgr-campaign-tag');
+  var campaignTag = tagEl ? tagEl.value.trim() : '';
+  if(!checked.length){ showToast('대상자가 없어요.'); return; }
+  if(!text){ showToast('메시지를 입력해주세요.'); return; }
+  var items = checked.map(function(m, i){ return { id:'mgr'+i+'_'+m.phone, name:m.name, phone:m.phone, text:text }; });
+  document.querySelector('.modal-overlay').remove();
+  openSendReviewModal(items, campaignTag);
 }
 function openGroupSmsModal(presetIds, presetLabel, presetMessage){
   _gsmsPresetIds = presetIds || null;
