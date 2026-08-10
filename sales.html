@@ -113,6 +113,8 @@ tr.row-clickable:hover{background:var(--sf2);}
 .cal-cell{background:var(--sf2);border-radius:6px;min-height:170px;min-width:0;padding:4px;font-size:11px;position:relative;cursor:pointer;display:flex;flex-direction:column;overflow:hidden;}
 .cal-ampm-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-top:3px;}
 .cal-cell.today{border:1px solid var(--accent);}
+.cal-cell.other-month{background:#f0f1f4;opacity:0.65;}
+.cal-cell.other-month .dnum{color:#b8bcc4;}
 .cal-cell .dnum{font-size:11px;color:var(--muted);}
 .cal-cell .sched{font-size:10px;background:var(--a2);color:var(--accent);border-radius:4px;padding:1px 4px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;box-sizing:border-box;display:block;}
 .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:var(--sf3);color:var(--text);padding:10px 18px;border-radius:10px;font-size:13px;z-index:900;opacity:0;transition:opacity .2s;pointer-events:none;}
@@ -2969,6 +2971,15 @@ function renderProfileTrend(empId){
 }
 
 /* ---------- CALENDAR ---------- */
+// 대상자 있으면 이름, 없으면 위치·메모 중 있는 것만(둘다 있으면 둘다) 합쳐서 표시, 아무것도 없으면 ETC
+function schedShortLabel(s){
+  var p = s.empId ? people[s.empId] : null;
+  if(p) return p.name||'?';
+  var parts = [];
+  if(s.location) parts.push('📍'+s.location);
+  if(s.memo) parts.push(s.memo);
+  return parts.length ? parts.join(' · ') : 'ETC';
+}
 function renderCalendar(){
   var dows=['일','월','화','수','목','금','토'];
   document.getElementById('cal-dows').innerHTML = dows.map(function(d){return '<div class="cal-dow">'+d+'</div>';}).join('');
@@ -2978,11 +2989,10 @@ function renderCalendar(){
   var daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
   var today = new Date();
   var cellsEl = document.getElementById('cal-cells');
-  var html='';
-  for(var i=0;i<startDow;i++) html+='<div></div>';
-  for(var d=1; d<=daysInMonth; d++){
-    var dateStr = calYear+'-'+pad2(calMonth+1)+'-'+pad2(d);
-    var isToday = today.getFullYear()===calYear && today.getMonth()===calMonth && today.getDate()===d;
+
+  function dayCellHtml(y, m, d, isOtherMonth){
+    var dateStr = y+'-'+pad2(m+1)+'-'+pad2(d);
+    var isToday = !isOtherMonth && today.getFullYear()===y && today.getMonth()===m && today.getDate()===d;
     var daySchedules = getSchedulesForDate(dateStr).filter(function(s){ return !s.endDate; }); // 여러날 일정은 막대로 따로 표시하므로 여기서 제외
     daySchedules.sort(function(a,b){ return (a.time||'99:99').localeCompare(b.time||'99:99'); });
     var noTime = daySchedules.filter(function(s){ return !s.time; });
@@ -2991,17 +3001,38 @@ function renderCalendar(){
     function pillHtml(s){
       var p=s.empId?people[s.empId]:null; var t=s.type||'컨택'; var timeStr=s.time?s.time+' ':'';
       var col = TYPE_COLORS[t]||TYPE_COLORS.ETC;
-      var label = timeStr+'['+t+'] '+(p?p.name:(s.location?'📍'+s.location:'ETC'));
+      var label = timeStr+'['+t+'] '+schedShortLabel(s);
       var styleStr = 'background:'+col+'22;color:'+col+';border-left:2px solid '+col+';'+(p?'cursor:pointer;':'');
       if(p) return '<div class="sched" onclick="event.stopPropagation();openProfile(\''+s.empId+'\')" style="'+styleStr+'">'+label+'</div>';
       return '<div class="sched" style="'+styleStr+'">'+label+'</div>';
     }
-    html += '<div class="cal-cell'+(isToday?' today':'')+'" onclick="openDayModal(\''+dateStr+'\')">'
+    return '<div class="cal-cell'+(isToday?' today':'')+(isOtherMonth?' other-month':'')+'" onclick="openDayModal(\''+dateStr+'\')">'
       +'<div class="dnum">'+d+'</div>'
       + noTime.map(pillHtml).join('')
       + (amItems.length? '<div class="cal-ampm-label">오전</div>'+amItems.map(pillHtml).join('') : '')
       + (pmItems.length? '<div class="cal-ampm-label">오후</div>'+pmItems.map(pillHtml).join('') : '')
       +'</div>';
+  }
+
+  var html='';
+  // 이전달 꼬리 날짜 (빈칸 대신 옅은 톤으로 채움)
+  var prevMonthLastDay = new Date(calYear, calMonth, 0).getDate();
+  var prevY = calMonth===0 ? calYear-1 : calYear;
+  var prevM = calMonth===0 ? 11 : calMonth-1;
+  for(var i=0;i<startDow;i++){
+    var pd = prevMonthLastDay - startDow + 1 + i;
+    html += dayCellHtml(prevY, prevM, pd, true);
+  }
+  for(var d=1; d<=daysInMonth; d++){
+    html += dayCellHtml(calYear, calMonth, d, false);
+  }
+  // 다음달 시작 날짜 (마지막 주를 7칸으로 채움)
+  var totalCells = startDow + daysInMonth;
+  var trailing = (7 - (totalCells % 7)) % 7;
+  var nextY = calMonth===11 ? calYear+1 : calYear;
+  var nextM = calMonth===11 ? 0 : calMonth+1;
+  for(var j=1;j<=trailing;j++){
+    html += dayCellHtml(nextY, nextM, j, true);
   }
   cellsEl.innerHTML = html + buildRangeBarsHtml(startDow, daysInMonth);
 }
@@ -3030,7 +3061,7 @@ function buildRangeBarsHtml(startDow, daysInMonth){
     var p = s.empId ? people[s.empId] : null;
     var t = s.type||'컨택';
     var col2 = TYPE_COLORS[t]||TYPE_COLORS.ETC;
-    var label = '['+t+'] '+(p?(p.name||'?'):(s.location?'📍'+s.location:'ETC'));
+    var label = '['+t+'] '+schedShortLabel(s);
     segments.forEach(function(seg){
       var stackIdx = rowBarCount[seg.row] || 0;
       rowBarCount[seg.row] = stackIdx+1;
