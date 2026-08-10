@@ -37,6 +37,7 @@ main{padding:18px 14px;max-width:1200px;margin:0 auto;padding-bottom:60px;}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
 .btn.danger{border-color:#f6c8d1;color:var(--danger);}
 input,select,textarea{background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:9px 12px;color:var(--text);outline:none;width:100%;}
+input[type=checkbox],input[type=radio]{width:auto;padding:0;border:none;background:none;border-radius:0;flex-shrink:0;}
 input:focus,select:focus,textarea:focus{border-color:var(--accent);}
 .grid-4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;}
 .grid-5{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;}
@@ -106,7 +107,8 @@ tr.row-clickable:hover{background:var(--sf2);}
 .note-date{font-size:11px;color:var(--muted);display:flex;justify-content:space-between;}
 .note-text{font-size:13px;margin-top:4px;white-space:pre-wrap;}
 .trash-icon{cursor:pointer;color:var(--muted);font-size:12px;}
-.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;}
+.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;position:relative;}
+.cal-range-bar{position:absolute;height:16px;border-radius:4px;font-size:9.5px;color:#fff;padding:0 6px;display:flex;align-items:center;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer;z-index:2;box-sizing:border-box;}
 .cal-dow{font-size:11px;color:var(--muted);text-align:center;padding:4px 0;}
 .cal-cell{background:var(--sf2);border-radius:6px;min-height:170px;min-width:0;padding:4px;font-size:11px;position:relative;cursor:pointer;display:flex;flex-direction:column;overflow:hidden;}
 .cal-ampm-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;margin-top:3px;}
@@ -575,7 +577,7 @@ var SW_WHEEL_ITEMS = [
   {no:3, kr:'세일즈 파이프라인', en:'Sales Pipeline', desc:'주간·월간 활동관리'},
   {no:4, kr:'퍼포먼스 리뷰', en:'Performance Review', desc:'월말리뷰, 매니저 면담·코칭'},
   {no:5, kr:'커리어 리뷰', en:'Career Review', desc:'장기 커리어, Honors Club'},
-  {no:6, kr:'PSP', en:'Personality Style Profiles', desc:'개인성향별 맞춤 코칭'},
+  {no:6, kr:'PSP', en:'PSP', desc:'개인성향별 맞춤 코칭'},
   {no:7, kr:'필드 세그멘테이션', en:'Field Segmentation', desc:'그룹별 맞춤교육·캠페인 (STAR, MDRT 등)'}
 ];
 function swItemOf(no){ return SW_WHEEL_ITEMS.find(function(s){ return s.no===Number(no); }) || null; }
@@ -2616,7 +2618,7 @@ function scaleAverageBadge(secTemplate, items){
 function swChipHtml(no){
   var s = swItemOf(no);
   if(!s) return '';
-  return ' <span style="font-size:9px;font-weight:700;color:#fff;background:var(--accent);padding:1px 6px;border-radius:6px;white-space:nowrap;">'+s.en+'</span>';
+  return ' <span style="font-size:10px;color:var(--muted);white-space:nowrap;">('+s.en+')</span>';
 }
 function buildSurveyTemplatePreviewHtml(){
   if(!surveyTemplate || !surveyTemplate.sections || !surveyTemplate.sections.length){
@@ -2981,7 +2983,7 @@ function renderCalendar(){
   for(var d=1; d<=daysInMonth; d++){
     var dateStr = calYear+'-'+pad2(calMonth+1)+'-'+pad2(d);
     var isToday = today.getFullYear()===calYear && today.getMonth()===calMonth && today.getDate()===d;
-    var daySchedules = getSchedulesForDate(dateStr);
+    var daySchedules = getSchedulesForDate(dateStr).filter(function(s){ return !s.endDate; }); // 여러날 일정은 막대로 따로 표시하므로 여기서 제외
     daySchedules.sort(function(a,b){ return (a.time||'99:99').localeCompare(b.time||'99:99'); });
     var noTime = daySchedules.filter(function(s){ return !s.time; });
     var amItems = daySchedules.filter(function(s){ return s.time && parseInt(s.time.slice(0,2))<12; });
@@ -3001,7 +3003,44 @@ function renderCalendar(){
       + (pmItems.length? '<div class="cal-ampm-label">오후</div>'+pmItems.map(pillHtml).join('') : '')
       +'</div>';
   }
-  cellsEl.innerHTML = html;
+  cellsEl.innerHTML = html + buildRangeBarsHtml(startDow, daysInMonth);
+}
+// 여러 날에 걸친(endDate 있는) 일정을, 주(week) 단위로 끊어서 grid-column/row로 이어진 막대로 렌더링
+function buildRangeBarsHtml(startDow, daysInMonth){
+  var monthStart = calYear+'-'+pad2(calMonth+1)+'-01';
+  var monthEnd = calYear+'-'+pad2(calMonth+1)+'-'+pad2(daysInMonth);
+  var rangeSchedules = Object.keys(schedules).map(function(k){ return Object.assign({id:k}, schedules[k]); })
+    .filter(function(s){ return s.endDate && s.date<=monthEnd && s.endDate>=monthStart; });
+  var rowBarCount = {};
+  var html = '';
+  rangeSchedules.forEach(function(s){
+    var clipStart = s.date < monthStart ? monthStart : s.date;
+    var clipEnd = s.endDate > monthEnd ? monthEnd : s.endDate;
+    var startDay = parseInt(clipStart.slice(8,10));
+    var endDay = parseInt(clipEnd.slice(8,10));
+    var segments = [];
+    for(var d=startDay; d<=endDay; d++){
+      var idx = startDow + (d-1);
+      var row = Math.floor(idx/7);
+      var col = idx%7;
+      var last = segments[segments.length-1];
+      if(last && last.row===row && last.colEnd===col-1){ last.colEnd = col; }
+      else segments.push({row:row, colStart:col, colEnd:col});
+    }
+    var p = s.empId ? people[s.empId] : null;
+    var t = s.type||'컨택';
+    var col2 = TYPE_COLORS[t]||TYPE_COLORS.ETC;
+    var label = '['+t+'] '+(p?(p.name||'?'):(s.location?'📍'+s.location:'ETC'));
+    segments.forEach(function(seg){
+      var stackIdx = rowBarCount[seg.row] || 0;
+      rowBarCount[seg.row] = stackIdx+1;
+      html += '<div class="cal-range-bar" style="background:'+col2+';'
+        +'grid-column:'+(seg.colStart+1)+'/'+(seg.colEnd+2)+';grid-row:'+(seg.row+1)+';'
+        +'bottom:'+(4+stackIdx*19)+'px;left:2px;right:2px;"'
+        +' onclick="event.stopPropagation();openDayModal(\''+s.date+'\')" title="'+s.date+' ~ '+s.endDate+' '+label.replace(/"/g,'&quot;')+'">'+label+'</div>';
+    });
+  });
+  return html;
 }
 function calShift(dir){
   calMonth += dir;
@@ -3013,6 +3052,7 @@ var TYPE_COLORS = { 컨택:'#4361ee', 코칭:'#0f9d67', 교육:'#c97a12', 행사
 function scheduleOccursOnDate(s, dateStr){
   if(s.exceptions && s.exceptions.indexOf(dateStr)>-1) return false;
   if(s.date===dateStr) return true;
+  if(s.endDate) return dateStr>s.date && dateStr<=s.endDate;
   if(!s.recurrence || !s.recurrence.type || s.recurrence.type==='none') return false;
   var seed = new Date(s.date+'T00:00:00');
   var target = new Date(dateStr+'T00:00:00');
@@ -3093,6 +3133,8 @@ function openDayModal(dateStr){
       +'<select id="sched-type"><option>컨택</option><option>코칭</option><option>교육</option><option>행사</option><option>본사미팅</option><option>ETC</option></select>'
       +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">시간 (선택)</label>'
       +'<input type="time" id="sched-time">'
+      +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">종료일 (선택, 비우면 당일만 · 여러 날이면 달력에 막대로 이어져 표시돼요)</label>'
+      +'<input type="date" id="sched-end-date" min="'+dateStr+'" onchange="toggleRangeVsRecur()">'
       +'<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin:10px 0 4px;cursor:pointer;white-space:nowrap;">'
         +'<input type="checkbox" id="sched-has-target"'+(_lastSchedHasTarget?' checked':'')+' onchange="toggleSchedTargetFields()"> 대상자 지정'
       +'</label>'
@@ -3104,7 +3146,7 @@ function openDayModal(dateStr){
       +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">장소 / 웹미팅 링크</label>'
       +'<input type="text" id="sched-location" placeholder="예: 강남 사무실, 또는 https://zoom.us/...">'
       +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">반복</label>'
-      +'<select id="sched-recur-type" onchange="toggleRecurFields()">'
+      +'<select id="sched-recur-type" onchange="toggleRecurFields();toggleRangeVsRecur();">'
         +'<option value="none">반복 안 함</option>'
         +'<option value="weekly">매주 (같은 요일)</option>'
         +'<option value="weekdays">특정 요일마다</option>'
@@ -3128,6 +3170,22 @@ function openDayModal(dateStr){
   document.body.appendChild(overlay);
   initSchedSelects();
   toggleSchedTargetFields();
+}
+function toggleRangeVsRecur(){
+  var endEl = document.getElementById('sched-end-date');
+  var recurEl = document.getElementById('sched-recur-type');
+  if(!endEl || !recurEl) return;
+  if(endEl.value){
+    recurEl.value = 'none';
+    recurEl.disabled = true;
+    toggleRecurFields();
+  } else if(recurEl.value !== 'none'){
+    endEl.value = '';
+    endEl.disabled = true;
+  } else {
+    recurEl.disabled = false;
+    endEl.disabled = false;
+  }
 }
 function toggleSchedTargetFields(){
   var checked = document.getElementById('sched-has-target').checked;
@@ -3163,10 +3221,12 @@ function saveSchedule(dateStr){
   var empId = hasTarget ? document.getElementById('sched-person').value : '';
   var type = document.getElementById('sched-type').value;
   var time = document.getElementById('sched-time').value;
+  var endDate = document.getElementById('sched-end-date').value;
+  if(endDate && endDate < dateStr){ showToast('종료일은 시작일보다 빠를 수 없어요.'); return; }
   var location = document.getElementById('sched-location').value.trim();
   var memo = document.getElementById('sched-memo').value.trim();
   if(hasTarget && !empId){ showToast('대상자를 선택하거나, "대상자 지정" 체크를 해제해주세요.'); return; }
-  var recurType = document.getElementById('sched-recur-type').value;
+  var recurType = endDate ? 'none' : document.getElementById('sched-recur-type').value;
   var recurrence = null;
   if(recurType!=='none'){
     recurrence = { type: recurType };
@@ -3180,14 +3240,14 @@ function saveSchedule(dateStr){
   _lastSchedHasTarget = hasTarget;
   var wasEditing = !!_editingScheduleId;
   var id = _editingScheduleId || ('s'+Date.now());
-  var entry={date:dateStr, time:time, empId:empId||null, type:type, location:location, memo:memo, done:false, recurrence:recurrence};
+  var entry={date:dateStr, endDate:(endDate&&endDate!==dateStr?endDate:null), time:time, empId:empId||null, type:type, location:location, memo:memo, done:false, recurrence:recurrence};
   fetch(FB_URL+ROOT+'/schedules/'+id+'.json',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(entry)});
   schedules[id]=entry;
   _editingScheduleId = null;
   document.querySelector('.modal-overlay').remove();
   renderCalendar();
   renderDashboard();
-  showToast(wasEditing ? '일정이 수정됐어요.' : '일정이 추가됐어요.');
+  showToast(wasEditing ? '일정이 수정됐어요.' : (entry.endDate ? (dateStr+' ~ '+entry.endDate+' 일정이 추가됐어요.') : '일정이 추가됐어요.'));
 }
 function editSchedule(id, dateStr){
   var s = schedules[id];
@@ -3195,6 +3255,8 @@ function editSchedule(id, dateStr){
   _editingScheduleId = id;
   document.getElementById('sched-type').value = s.type||'컨택';
   document.getElementById('sched-time').value = s.time||'';
+  document.getElementById('sched-end-date').value = s.endDate||'';
+  document.getElementById('sched-end-date').disabled = false;
   document.getElementById('sched-location').value = s.location||'';
   document.getElementById('sched-memo').value = s.memo||'';
   var hasTarget = !!s.empId;
@@ -3214,6 +3276,7 @@ function editSchedule(id, dateStr){
     el.checked = !!(s.recurrence && s.recurrence.days && s.recurrence.days.indexOf(parseInt(el.value))>-1);
   });
   toggleRecurFields();
+  toggleRangeVsRecur();
   document.getElementById('sched-submit-btn').textContent = '수정 저장';
   document.getElementById('sched-cancel-edit').style.display = 'inline-block';
   document.getElementById('sched-form-title').textContent = '✏️ 일정 수정';
@@ -3223,14 +3286,18 @@ function cancelEditSchedule(){
   _editingScheduleId = null;
   document.getElementById('sched-type').value = '컨택';
   document.getElementById('sched-time').value = '';
+  document.getElementById('sched-end-date').value = '';
+  document.getElementById('sched-end-date').disabled = false;
   document.getElementById('sched-location').value = '';
   document.getElementById('sched-memo').value = '';
   document.getElementById('sched-has-target').checked = _lastSchedHasTarget;
   toggleSchedTargetFields();
   document.getElementById('sched-recur-type').value = 'none';
+  document.getElementById('sched-recur-type').disabled = false;
   document.getElementById('sched-recur-until').value = '';
   document.querySelectorAll('.sched-recur-dow').forEach(function(el){ el.checked=false; });
   toggleRecurFields();
+  toggleRangeVsRecur();
   document.getElementById('sched-submit-btn').textContent = '일정 추가';
   document.getElementById('sched-cancel-edit').style.display = 'none';
   document.getElementById('sched-form-title').textContent = '+ 새 일정 추가';
