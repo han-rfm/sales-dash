@@ -108,6 +108,7 @@ tr.row-clickable:hover{background:var(--sf2);}
 .note-text{font-size:13px;margin-top:4px;white-space:pre-wrap;}
 .trash-icon{cursor:pointer;color:var(--muted);font-size:12px;}
 .cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;position:relative;}
+#cal-cells{grid-template-rows:repeat(6,minmax(0,auto));}
 .cal-range-bar{position:absolute;height:16px;border-radius:4px;font-size:9.5px;color:#fff;padding:0 6px;display:flex;align-items:center;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer;z-index:2;box-sizing:border-box;}
 .cal-dow{font-size:11px;color:var(--muted);text-align:center;padding:4px 0;}
 .cal-cell{background:var(--sf2);border-radius:6px;min-height:170px;min-width:0;padding:4px;font-size:11px;position:relative;cursor:pointer;display:flex;flex-direction:column;overflow:hidden;}
@@ -3207,7 +3208,7 @@ function renderCalendar(){
       return '<div class="sched" style="'+styleStr+'">'+label+'</div>';
     }
     var hasActivity = getActivityLogForDate(dateStr).length > 0;
-    return '<div class="cal-cell'+(isToday?' today':'')+(isOtherMonth?' other-month':'')+'" onclick="openDayModal(\''+dateStr+'\')">'
+    return '<div class="cal-cell'+(isToday?' today':'')+(isOtherMonth?' other-month':'')+'" data-cal-day="'+dateStr+'" onclick="openDayModal(\''+dateStr+'\')">'
       +'<div class="dnum">'+d+(hasActivity?' <span class="activity-dot" title="이 날 활동기록 있음"></span>':'')+'</div>'
       + noTime.map(pillHtml).join('')
       + (amItems.length? '<div class="cal-ampm-label">오전</div>'+amItems.map(pillHtml).join('') : '')
@@ -3235,16 +3236,21 @@ function renderCalendar(){
   for(var j=1;j<=trailing;j++){
     html += dayCellHtml(nextY, nextM, j, true);
   }
-  cellsEl.innerHTML = html + buildRangeBarsHtml(startDow, daysInMonth);
+  cellsEl.innerHTML = html;
+  positionRangeBars(cellsEl, startDow, daysInMonth); // 날짜 칸이 실제로 DOM에 그려진 뒤, 진짜 좌표를 측정해서 막대를 배치
 }
-// 여러 날에 걸친(endDate 있는) 일정을, 주(week) 단위로 끊어서 grid-column/row로 이어진 막대로 렌더링
-function buildRangeBarsHtml(startDow, daysInMonth){
+// 여러 날에 걸친(endDate 있는) 일정을, 주(week) 단위 세그먼트로 나눈 뒤
+// CSS grid-row/column(스펙상 position:absolute와 만나면 브라우저별로 애매해질 수 있음) 대신,
+// 실제로 화면에 그려진 날짜 칸의 좌표를 getBoundingClientRect로 직접 측정해서 픽셀 단위로 막대를 배치한다.
+function positionRangeBars(cellsEl, startDow, daysInMonth){
   var monthStart = calYear+'-'+pad2(calMonth+1)+'-01';
   var monthEnd = calYear+'-'+pad2(calMonth+1)+'-'+pad2(daysInMonth);
   var rangeSchedules = Object.keys(schedules).map(function(k){ return Object.assign({id:k}, schedules[k]); })
     .filter(function(s){ return s.endDate && s.date<=monthEnd && s.endDate>=monthStart; });
+  if(!rangeSchedules.length) return;
+  var containerRect = cellsEl.getBoundingClientRect();
   var rowBarCount = {};
-  var html = '';
+  var frag = document.createDocumentFragment();
   rangeSchedules.forEach(function(s){
     var clipStart = s.date < monthStart ? monthStart : s.date;
     var clipEnd = s.endDate > monthEnd ? monthEnd : s.endDate;
@@ -3256,23 +3262,37 @@ function buildRangeBarsHtml(startDow, daysInMonth){
       var row = Math.floor(idx/7);
       var col = idx%7;
       var last = segments[segments.length-1];
-      if(last && last.row===row && last.colEnd===col-1){ last.colEnd = col; }
-      else segments.push({row:row, colStart:col, colEnd:col});
+      if(last && last.row===row && last.colEnd===col-1){ last.colEnd = col; last.endDay = d; }
+      else segments.push({row:row, colStart:col, colEnd:col, startDay:d, endDay:d});
     }
     var p = s.empId ? people[s.empId] : null;
     var t = s.type||'컨택';
     var col2 = TYPE_COLORS[t]||TYPE_COLORS.ETC;
     var label = '['+t+'] '+schedShortLabel(s);
     segments.forEach(function(seg){
+      // 이 세그먼트는 항상 이번 달 안에서만 계산되므로, 연/월은 고정하고 day만 채우면 됨
+      var segStartDate = calYear+'-'+pad2(calMonth+1)+'-'+pad2(seg.startDay);
+      var segEndDate = calYear+'-'+pad2(calMonth+1)+'-'+pad2(seg.endDay);
+      var cellA = cellsEl.querySelector('[data-cal-day="'+segStartDate+'"]');
+      var cellB = cellsEl.querySelector('[data-cal-day="'+segEndDate+'"]');
+      if(!cellA || !cellB) return; // 혹시 못 찾으면 조용히 건너뜀 (화면 깨지는 것보단 나음)
+      var rectA = cellA.getBoundingClientRect();
+      var rectB = cellB.getBoundingClientRect();
       var stackIdx = rowBarCount[seg.row] || 0;
       rowBarCount[seg.row] = stackIdx+1;
-      html += '<div class="cal-range-bar" style="background:'+col2+';'
-        +'grid-column:'+(seg.colStart+1)+'/'+(seg.colEnd+2)+';grid-row:'+(seg.row+1)+';'
-        +'bottom:'+(4+stackIdx*19)+'px;left:2px;right:2px;"'
-        +' onclick="event.stopPropagation();openDayModal(\''+s.date+'\')" title="'+s.date+' ~ '+s.endDate+' '+label.replace(/"/g,'&quot;')+'">'+label+'</div>';
+      var bar = document.createElement('div');
+      bar.className = 'cal-range-bar';
+      bar.style.background = col2;
+      bar.style.left = (rectA.left - containerRect.left + 2) + 'px';
+      bar.style.width = (rectB.right - rectA.left - 4) + 'px';
+      bar.style.top = (rectA.top - containerRect.top + 20 + stackIdx*19) + 'px';
+      bar.title = s.date+' ~ '+s.endDate+' '+label;
+      bar.textContent = label;
+      bar.onclick = function(e){ e.stopPropagation(); openDayModal(s.date); };
+      frag.appendChild(bar);
     });
   });
-  return html;
+  cellsEl.appendChild(frag);
 }
 // 캘린더에 표시 중인 달(month) 또는 오늘 기준 이번 주(week)의 활동기록을 엑셀로 출력
 function buildActivityLogExportData(range, refDate){
@@ -3514,12 +3534,14 @@ function openDayModal(dateStr){
         var tCol = typeBadgeColor[t]||'var(--muted)';
         var nameLabel = p ? (p.name||'?') : '(대상자 없음)';
         var timeLabel = s.time ? ('<span style="color:var(--muted);font-size:11px;margin-right:4px;">🕐 '+s.time+(s.endTime?'~'+s.endTime:'')+'</span>') : '<span style="color:var(--muted);font-size:11px;margin-right:4px;">종일</span>';
+        var rangeBadge = s.endDate ? '<div style="font-size:10.5px;color:'+tCol+';font-weight:700;margin-top:4px;">📆 '+s.date+' ~ '+s.endDate+'</div>' : '';
         var locHtml = locationHtml(s.location);
         var isRecurring = s.recurrence && s.recurrence.type && s.recurrence.type!=='none';
         var recurBadge = isRecurring ? ' <span style="font-size:10px;color:var(--muted);">🔁 반복</span>' : '';
         var recurNote = isRecurring ? '<div style="font-size:10px;color:var(--muted);margin-top:3px;">반복 일정이에요 — "수정"·"전체삭제"는 시리즈 전체에 적용돼요.</div>' : '';
         return '<div class="note-item" style="border-left:3px solid '+tCol+';border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">'
           +'<div class="note-date"><span>'+timeLabel+'<span style="color:'+tCol+';font-weight:700;background:'+tCol+'15;padding:2px 7px;border-radius:5px;">'+t+'</span> <b style="color:var(--text);">'+nameLabel+'</b>'+recurBadge+'</span><span class="trash-icon" onclick="deleteSchedule(\''+s.id+'\',\''+dateStr+'\')">'+(isRecurring?'전체삭제':'삭제')+'</span></div>'
+          + rangeBadge
           +(s.memo?'<div class="note-text">'+s.memo+'</div>':'')+locHtml+recurNote
           +'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">'
           +'<button class="btn" style="font-size:11px;padding:5px 10px;" onclick="editSchedule(\''+s.id+'\',\''+dateStr+'\')">✏️ 수정</button>'
