@@ -2816,7 +2816,7 @@ function openQuickScheduleModal(empId){
   var today = new Date().toISOString().slice(0,10);
   box.innerHTML = '<button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button>'
     +'<div class="card-title">📅 '+p.name+'님과 약속 잡기</div>'
-    +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">날짜</label>'
+    +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">시작일</label>'
     +'<input type="date" id="qs-date" value="'+today+'" onchange="document.getElementById(\'sched-end-date\').min=this.value;">'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">유형</label>'
     +'<select id="qs-type"><option>컨택</option><option>코칭</option><option>교육</option><option>행사</option><option>본사미팅</option><option>ETC</option></select>'
@@ -3531,9 +3531,11 @@ function openDayModal(dateStr){
     +'<div style="border-top:1px solid var(--bd);padding-top:12px;margin-top:10px;">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'
         +'<div id="sched-form-title" style="font-size:13px;font-weight:700;color:var(--accent);">+ 새 일정 추가</div>'
-        +'<button id="sched-cancel-edit" class="btn" style="display:none;font-size:11px;padding:4px 8px;" onclick="cancelEditSchedule()">수정 취소</button>'
+        +'<button id="sched-cancel-edit" class="btn" style="display:none;font-size:11px;padding:4px 8px;" onclick="cancelEditSchedule(\''+dateStr+'\')">수정 취소</button>'
       +'</div>'
-      +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">유형</label>'
+      +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">시작일</label>'
+      +'<input type="date" id="sched-start-date" value="'+dateStr+'" onchange="onSchedStartDateChange()">'
+      +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">유형</label>'
       +'<select id="sched-type"><option>컨택</option><option>코칭</option><option>교육</option><option>행사</option><option>본사미팅</option><option>ETC</option></select>'
       +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">시간 (선택)</label>'
       +'<input type="time" id="sched-time">'
@@ -3576,6 +3578,13 @@ function openDayModal(dateStr){
   document.body.appendChild(overlay);
   initSchedSelects();
   toggleSchedTargetFields();
+}
+function onSchedStartDateChange(){
+  var startEl = document.getElementById('sched-start-date');
+  var endEl = document.getElementById('sched-end-date');
+  if(!startEl || !endEl) return;
+  endEl.min = startEl.value;
+  if(endEl.value && endEl.value < startEl.value) endEl.value = ''; // 시작일이 종료일보다 늦어지면 종료일 초기화
 }
 function toggleRangeVsRecur(){
   var endEl = document.getElementById('sched-end-date');
@@ -3624,8 +3633,9 @@ function schedBranchChanged(){
 }
 function saveSchedule(dateStr){
   var wasEditing = !!_editingScheduleId;
-  // 수정 모드면 팝업을 연 날짜가 아니라, 이 일정의 원래 시작일을 그대로 써야 함 (다른 날짜 팝업에서 열어도 시작일이 안 밀리게)
-  var anchorDate = wasEditing && _editingScheduleOriginDate ? _editingScheduleOriginDate : dateStr;
+  // 시작일은 이제 "시작일" 입력칸 값을 그대로 사용 — 팝업을 연 날짜와 무관하게, 사용자가 직접 지정/수정 가능
+  var startEl = document.getElementById('sched-start-date');
+  var anchorDate = startEl && startEl.value ? startEl.value : dateStr;
   var hasTarget = document.getElementById('sched-has-target').checked;
   var empId = hasTarget ? document.getElementById('sched-person').value : '';
   var type = document.getElementById('sched-type').value;
@@ -3663,10 +3673,13 @@ function editSchedule(id, dateStr){
   var s = schedules[id];
   if(!s) return;
   _editingScheduleId = id;
-  _editingScheduleOriginDate = s.date; // 팝업을 연 날짜(dateStr)가 아니라, 이 일정의 진짜 시작일을 저장해둠
+  _editingScheduleOriginDate = s.date;
+  var startEl = document.getElementById('sched-start-date');
+  if(startEl){ startEl.value = s.date; startEl.min=''; }
   document.getElementById('sched-type').value = s.type||'컨택';
   document.getElementById('sched-time').value = s.time||'';
   document.getElementById('sched-end-date').value = s.endDate||'';
+  document.getElementById('sched-end-date').min = s.date;
   document.getElementById('sched-end-date').disabled = false;
   document.getElementById('sched-end-time').value = s.endTime||'';
   document.getElementById('sched-location').value = s.location||'';
@@ -3694,12 +3707,15 @@ function editSchedule(id, dateStr){
   document.getElementById('sched-form-title').textContent = '✏️ 일정 수정';
   document.getElementById('sched-form-title').scrollIntoView({behavior:'smooth', block:'center'});
 }
-function cancelEditSchedule(){
+function cancelEditSchedule(dateStr){
   _editingScheduleId = null;
   _editingScheduleOriginDate = null;
+  var startEl = document.getElementById('sched-start-date');
+  if(startEl && dateStr){ startEl.value = dateStr; }
   document.getElementById('sched-type').value = '컨택';
   document.getElementById('sched-time').value = '';
   document.getElementById('sched-end-date').value = '';
+  document.getElementById('sched-end-date').min = dateStr||'';
   document.getElementById('sched-end-date').disabled = false;
   document.getElementById('sched-end-time').value = '';
   document.getElementById('sched-location').value = '';
