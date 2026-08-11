@@ -116,6 +116,7 @@ tr.row-clickable:hover{background:var(--sf2);}
 .cal-cell.other-month{background:#f0f1f4;opacity:0.65;}
 .cal-cell.other-month .dnum{color:#b8bcc4;}
 .cal-cell .dnum{font-size:11px;color:var(--muted);}
+.activity-dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--accent);vertical-align:middle;margin-left:2px;}
 .cal-cell .sched{font-size:10px;background:var(--a2);color:var(--accent);border-radius:4px;padding:1px 4px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;box-sizing:border-box;display:block;}
 .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:var(--sf3);color:var(--text);padding:10px 18px;border-radius:10px;font-size:13px;z-index:900;opacity:0;transition:opacity .2s;pointer-events:none;}
 .toast.show{opacity:1;}
@@ -338,10 +339,14 @@ tr.row-clickable:hover{background:var(--sf2);}
 
     <!-- CALENDAR -->
     <div class="view" id="view-calendar">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px;">
         <button class="btn" onclick="calShift(-1)">← 이전달</button>
         <div id="cal-title" style="font-weight:700;font-size:15px;"></div>
         <button class="btn" onclick="calShift(1)">다음달 →</button>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:12px;flex-wrap:wrap;">
+        <button class="btn" style="font-size:11px;padding:6px 10px;" onclick="openActivityLogPreviewModal('week')">📥 이번 주 활동기록</button>
+        <button class="btn" style="font-size:11px;padding:6px 10px;" onclick="openActivityLogPreviewModal('month')">📥 이번 달 활동기록</button>
       </div>
       <div class="cal-grid" id="cal-dows"></div>
       <div class="cal-grid" id="cal-cells" style="margin-top:4px;"></div>
@@ -3135,6 +3140,44 @@ function schedShortLabel(s){
   if(s.memo) parts.push(s.memo);
   return parts.length ? parts.join(' · ') : 'ETC';
 }
+// 특정 날짜(YYYY-MM-DD)에 실제 발생한 활동(전화/문자/만남메모)을 시간순으로 모아줌
+function getActivityLogForDate(dateStr){
+  var log = [];
+  Object.keys(contacts).forEach(function(id){
+    Object.values(contacts[id]).forEach(function(c){
+      if(!c.date || c.date.slice(0,10)!==dateStr) return;
+      if(id.indexOf('testself')===0) return; // 나에게 테스트 발송은 제외
+      var p = people[id];
+      var isMgr = id.indexOf('mgr')===0;
+      log.push({
+        time: c.date.slice(11,16), type: c.type==='call'?'전화':'문자', icon: c.type==='call'?'📞':'💬',
+        empId: p?id:null, name: p?p.name:(c.name||(isMgr?'담당자':'?')),
+        campaignTag: c.campaignTag||''
+      });
+    });
+  });
+  Object.keys(notes).forEach(function(id){
+    Object.values(notes[id]).forEach(function(n){
+      if(!n.date || n.date.slice(0,10)!==dateStr) return;
+      var p = people[id];
+      log.push({ time: n.date.slice(11,16), type:'만남', icon:'📝', empId:id, name:p?p.name:'?', memo:n.text||'' });
+    });
+  });
+  log.sort(function(a,b){ return (a.time||'').localeCompare(b.time||''); });
+  return log;
+}
+// 같은 시각·같은 유형·같은 캠페인태그로 묶인 그룹발송을 "N명"으로 뭉쳐서 보여주기 위한 그룹핑
+function groupActivityLog(log){
+  var groups = {};
+  var order = [];
+  log.forEach(function(item){
+    var key = item.time+'|'+item.type+'|'+(item.campaignTag||'')+'|'+(item.memo||'');
+    if(!groups[key]){ groups[key] = { time:item.time, type:item.type, icon:item.icon, campaignTag:item.campaignTag, memo:item.memo, names:[], empIds:[] }; order.push(key); }
+    groups[key].names.push(item.name);
+    groups[key].empIds.push(item.empId);
+  });
+  return order.map(function(k){ return groups[k]; });
+}
 function renderCalendar(){
   var dows=['일','월','화','수','목','금','토'];
   document.getElementById('cal-dows').innerHTML = dows.map(function(d){return '<div class="cal-dow">'+d+'</div>';}).join('');
@@ -3161,8 +3204,9 @@ function renderCalendar(){
       if(p) return '<div class="sched" onclick="event.stopPropagation();openProfile(\''+s.empId+'\')" style="'+styleStr+'">'+label+'</div>';
       return '<div class="sched" style="'+styleStr+'">'+label+'</div>';
     }
+    var hasActivity = getActivityLogForDate(dateStr).length > 0;
     return '<div class="cal-cell'+(isToday?' today':'')+(isOtherMonth?' other-month':'')+'" onclick="openDayModal(\''+dateStr+'\')">'
-      +'<div class="dnum">'+d+'</div>'
+      +'<div class="dnum">'+d+(hasActivity?' <span class="activity-dot" title="이 날 활동기록 있음"></span>':'')+'</div>'
       + noTime.map(pillHtml).join('')
       + (amItems.length? '<div class="cal-ampm-label">오전</div>'+amItems.map(pillHtml).join('') : '')
       + (pmItems.length? '<div class="cal-ampm-label">오후</div>'+pmItems.map(pillHtml).join('') : '')
@@ -3228,6 +3272,135 @@ function buildRangeBarsHtml(startDow, daysInMonth){
   });
   return html;
 }
+// 캘린더에 표시 중인 달(month) 또는 오늘 기준 이번 주(week)의 활동기록을 엑셀로 출력
+function buildActivityLogExportData(range, refDate){
+  var startDate, endDate, labelSuffix, rangeLabel;
+  if(range==='month'){
+    startDate = calYear+'-'+pad2(calMonth+1)+'-01';
+    endDate = calYear+'-'+pad2(calMonth+1)+'-'+pad2(new Date(calYear, calMonth+1, 0).getDate());
+    labelSuffix = calYear+pad2(calMonth+1);
+    rangeLabel = calYear+'년 '+(calMonth+1)+'월';
+  } else {
+    var ref = refDate ? new Date(refDate+'T00:00:00') : new Date();
+    var dow = ref.getDay();
+    var sun = new Date(ref); sun.setDate(ref.getDate()-dow);
+    var sat = new Date(ref); sat.setDate(ref.getDate()+(6-dow));
+    startDate = sun.getFullYear()+'-'+pad2(sun.getMonth()+1)+'-'+pad2(sun.getDate());
+    endDate = sat.getFullYear()+'-'+pad2(sat.getMonth()+1)+'-'+pad2(sat.getDate());
+    labelSuffix = startDate.replace(/-/g,'')+'~'+endDate.slice(5).replace('-','');
+    rangeLabel = startDate+' ~ '+endDate;
+  }
+  var DOW_KR = ['일','월','화','수','목','금','토'];
+  var todayStr = (function(){ var t=new Date(); return t.getFullYear()+'-'+pad2(t.getMonth()+1)+'-'+pad2(t.getDate()); })();
+  var items = [];
+  var d = new Date(startDate);
+  var end = new Date(endDate);
+  while(d<=end){
+    var dateStr = d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+    var dow2 = DOW_KR[new Date(dateStr+'T00:00:00').getDay()];
+    // 캘린더에 직접 입력한 스케줄 — 오늘/미래는 "예정", 이미 지난 날짜는 "지난일정"(완료 여부 미확정)으로 구분
+    getSchedulesForDate(dateStr).filter(function(s){ return !s.endDate || s.endDate===s.date; }).forEach(function(s){
+      var p = s.empId ? people[s.empId] : null;
+      var kind = dateStr < todayStr ? '지난일정' : '예정';
+      items.push({ date:dateStr, dow:dow2, time:s.time||'', kind:kind, activityType:s.type||'컨택', name:p?p.name:schedShortLabel(s), empId:s.empId||null, campaignTag:'', memo:s.memo||'' });
+    });
+    // 실제 발생한 활동(전화/문자/만남메모)
+    getActivityLogForDate(dateStr).forEach(function(item){
+      items.push({ date:dateStr, dow:dow2, time:item.time, kind:'완료', activityType:item.type, name:item.name, empId:item.empId||null, campaignTag:item.campaignTag||'', memo:item.memo||'' });
+    });
+    d.setDate(d.getDate()+1);
+  }
+  items.sort(function(a,b){ return (a.date+a.time).localeCompare(b.date+b.time); });
+  return { items:items, labelSuffix:labelSuffix, rangeLabel:rangeLabel };
+}
+// 같은 시각·유형·캠페인태그·메모로 묶이는 그룹발송을 "N명"으로 뭉쳐서 미리보기에 표시 (엑셀 자체는 개인별 그대로 유지)
+function groupPreviewItems(items){
+  var groups = {}, order = [];
+  items.forEach(function(it){
+    var key = it.date+'|'+it.time+'|'+it.kind+'|'+it.activityType+'|'+(it.campaignTag||'')+'|'+(it.memo||'');
+    if(!groups[key]){ groups[key] = Object.assign({}, it, {names:[], empIds:[]}); order.push(key); }
+    groups[key].names.push(it.name);
+    groups[key].empIds.push(it.empId);
+  });
+  return order.map(function(k){ return groups[k]; });
+}
+var _pendingActivityExport = null;
+var _actPreviewState = { range:'week', refDate:null };
+function openActivityLogPreviewModal(range){
+  var now = new Date();
+  _actPreviewState = { range: range, refDate: now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate()) };
+  var overlay=document.createElement('div');
+  overlay.className='modal-overlay'; overlay.id='activity-preview-overlay';
+  overlay.onclick=function(e){ if(e.target===overlay) overlay.remove(); };
+  var box=document.createElement('div');
+  box.className='modal-box'; box.id='activity-preview-box'; box.style.position='relative'; box.style.maxWidth='440px';
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  renderActivityPreviewModal();
+}
+function shiftActivityWeek(dir){
+  var d = new Date(_actPreviewState.refDate+'T00:00:00');
+  d.setDate(d.getDate()+7*dir);
+  _actPreviewState.refDate = d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+  renderActivityPreviewModal();
+}
+function renderActivityPreviewModal(){
+  var box = document.getElementById('activity-preview-box');
+  if(!box) return;
+  var range = _actPreviewState.range;
+  var data = buildActivityLogExportData(range, _actPreviewState.refDate);
+  _pendingActivityExport = data;
+  var navHtml = range==='week'
+    ? '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;background:var(--sf2);border-radius:8px;padding:6px 8px;">'
+        +'<button class="btn" style="font-size:11px;padding:5px 10px;" onclick="shiftActivityWeek(-1)">← 이전 주</button>'
+        +'<span style="font-size:12px;font-weight:700;">'+data.rangeLabel+'</span>'
+        +'<button class="btn" style="font-size:11px;padding:5px 10px;" onclick="shiftActivityWeek(1)">다음 주 →</button>'
+      +'</div>'
+    : '';
+  var groups = groupPreviewItems(data.items);
+  var countLine = '<p style="font-size:12px;color:var(--muted);margin-bottom:10px;">'+(range==='month'?data.rangeLabel+' · ':'')+'총 <b style="color:var(--accent);">'+data.items.length+'건</b>'+(groups.length!==data.items.length?' <span style="color:var(--muted);">('+groups.length+'개 묶음)</span>':'')+'</p>';
+  var listHtml = groups.length ? groups.map(function(g){
+    var typeCol = g.kind==='예정' ? 'var(--warn)' : (g.kind==='지난일정' ? 'var(--muted)' : 'var(--good)');
+    var namesLabel, expandBtn = '';
+    if(g.names.length<=3){
+      namesLabel = g.names.join(', ');
+    } else {
+      namesLabel = g.names.slice(0,3).join(', ')+' 외 '+(g.names.length-3)+'명';
+      var uid = 'actprev-'+Math.random().toString(36).slice(2,8);
+      expandBtn = ' <span style="color:var(--accent);cursor:pointer;font-size:11px;" onclick="var e=document.getElementById(\''+uid+'\');e.style.display=e.style.display===\'none\'?\'block\':\'none\';">[전체보기]</span>'
+        + '<div id="'+uid+'" style="display:none;font-size:11px;color:var(--muted);margin-top:3px;">'+g.names.join(', ')+'</div>';
+    }
+    var countLabel = g.names.length>1 ? ' <span style="color:var(--muted);font-size:10.5px;">('+g.names.length+'명)</span>' : '';
+    var contentLabel = (g.kind==='예정'||g.kind==='지난일정') ? '['+g.activityType+'] '+namesLabel : g.activityType+' · '+namesLabel;
+    return '<div class="note-item" style="padding:8px 10px;margin-bottom:5px;border-left:3px solid '+typeCol+';border-radius:8px;">'
+      +'<div style="font-size:10.5px;color:var(--muted);">'+g.date+' ('+g.dow+')'+(g.time?' · '+g.time:'')+'</div>'
+      +'<div style="font-size:12.5px;margin-top:2px;"><b style="color:'+typeCol+';">['+g.kind+']</b> '+contentLabel+countLabel+(g.campaignTag?' <span style="color:var(--muted);font-size:10.5px;">🏷 '+g.campaignTag+'</span>':'')+'</div>'
+      + expandBtn
+      +(g.memo?'<div class="note-text" style="font-size:11px;">'+g.memo+'</div>':'')
+    +'</div>';
+  }).join('') : '<div class="empty" style="padding:20px 0;">📭 이 기간엔 일정·활동기록이 없어요</div>';
+  box.innerHTML = '<button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button>'
+    +'<div class="card-title">📥 활동기록 미리보기</div>'
+    + navHtml + countLine
+    +'<div style="max-height:380px;overflow-y:auto;padding-right:2px;">'+listHtml+'</div>'
+    + (data.items.length ? '<button class="btn primary" style="width:100%;margin-top:12px;" onclick="confirmDownloadActivityLogExcel()">📥 이 기간 엑셀로 다운로드 (개인별 '+data.items.length+'행)</button>' : '');
+}
+function confirmDownloadActivityLogExcel(){
+  var data = _pendingActivityExport;
+  if(!data || !data.items.length){ return; }
+  var rows = data.items.map(function(it){
+    var content = (it.kind==='예정'||it.kind==='지난일정') ? '['+it.activityType+'] '+it.name : it.activityType+' · '+it.name;
+    return [it.date, it.dow, it.time, it.kind, content, it.campaignTag||'', it.memo||''];
+  });
+  var aoa = [['날짜','요일','시간','구분','내용','캠페인 태그','메모'], ...rows];
+  var ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:12},{wch:6},{wch:8},{wch:8},{wch:26},{wch:22},{wch:30}];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '활동기록');
+  XLSX.writeFile(wb, '활동기록_'+data.labelSuffix+'.xlsx');
+  var overlayEl = document.getElementById('activity-preview-overlay');
+  if(overlayEl) overlayEl.remove();
+}
 function calShift(dir){
   calMonth += dir;
   if(calMonth<0){calMonth=11;calYear--;}
@@ -3281,6 +3454,38 @@ function locationHtml(location){
   }
   return html;
 }
+function buildActivityLogSectionHtml(dateStr){
+  var log = getActivityLogForDate(dateStr);
+  if(!log.length) return '';
+  var groups = groupActivityLog(log);
+  var rows = groups.map(function(g){
+    var namesLabel, expandBtn = '';
+    if(g.names.length<=3){
+      namesLabel = g.names.map(function(n,i){
+        return g.empIds[i] ? '<span style="cursor:pointer;color:var(--accent);" onclick="openProfile(\''+g.empIds[i]+'\')">'+n+'</span>' : n;
+      }).join(', ');
+    } else {
+      namesLabel = g.names.slice(0,3).join(', ')+' 외 '+(g.names.length-3)+'명';
+      var uid = 'actlog-'+Math.random().toString(36).slice(2,8);
+      var fullList = g.names.map(function(n,i){
+        return g.empIds[i] ? '<span style="cursor:pointer;color:var(--accent);" onclick="openProfile(\''+g.empIds[i]+'\')">'+n+'</span>' : n;
+      }).join(', ');
+      expandBtn = ' <span style="color:var(--accent);cursor:pointer;font-size:11px;" onclick="var e=document.getElementById(\''+uid+'\');e.style.display=e.style.display===\'none\'?\'block\':\'none\';">[전체보기]</span>'
+        + '<div id="'+uid+'" style="display:none;font-size:11px;color:var(--muted);margin-top:3px;">'+fullList+'</div>';
+    }
+    var tagLabel = g.campaignTag ? ' <span style="font-size:10px;color:var(--muted);">🏷 '+g.campaignTag+'</span>' : '';
+    var memoLabel = g.memo ? '<div class="note-text">'+g.memo+'</div>' : '';
+    var gCol = g.type==='전화' ? (TYPE_COLORS['컨택']||'var(--good)') : (g.type==='만남' ? 'var(--warn)' : 'var(--accent)');
+    return '<div class="note-item" style="border-left:3px solid '+gCol+';border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);"><div class="note-date"><span>'
+        +'<span style="color:var(--muted);font-size:11px;margin-right:4px;">🕐 '+g.time+'</span>'
+        + g.icon+' <b style="color:'+gCol+';">'+g.type+'</b> '+namesLabel + (g.names.length>1?' <span style="color:var(--muted);font-size:11px;">('+g.names.length+'명)</span>':'') + tagLabel
+      +'</span></div>'+expandBtn+memoLabel+'</div>';
+  }).join('');
+  return '<div style="border-top:1px solid var(--bd);padding-top:12px;margin-top:12px;">'
+    +'<div style="font-size:12.5px;font-weight:800;color:var(--good);margin-bottom:8px;">✅ 이 날 활동 기록 <span style="font-weight:400;color:var(--muted);">('+log.length+'건)</span></div>'
+    + rows
+  +'</div>';
+}
 function openDayModal(dateStr){
   _editingScheduleId = null;
   var overlay=document.createElement('div');
@@ -3291,25 +3496,34 @@ function openDayModal(dateStr){
   var daySchedules = getSchedulesForDate(dateStr);
   daySchedules.sort(function(a,b){ return (a.time||'99:99').localeCompare(b.time||'99:99'); });
   var typeBadgeColor = TYPE_COLORS;
+  var dowLabel = ['일','월','화','수','목','금','토'][new Date(dateStr+'T00:00:00').getDay()];
+  var isToday = dateStr === (new Date()).toISOString().slice(0,10);
   box.innerHTML = '<button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button>'
-    +'<div class="card-title">'+dateStr+' 일정</div>'
+    +'<div style="display:flex;align-items:baseline;gap:6px;margin-bottom:14px;">'
+      +'<span style="font-size:17px;font-weight:800;color:var(--text);">'+dateStr+'</span>'
+      +'<span style="font-size:13px;font-weight:700;color:var(--accent);">('+dowLabel+')</span>'
+      +(isToday?'<span class="badge" style="background:var(--accent);color:#fff;font-size:10px;padding:2px 8px;">오늘</span>':'')
+    +'</div>'
     +'<div id="day-sched-list">'+ (daySchedules.length? daySchedules.map(function(s){
         var p=s.empId?(people[s.empId]||{}):null;
         var t = s.type||'컨택';
         var tCol = typeBadgeColor[t]||'var(--muted)';
         var nameLabel = p ? (p.name||'?') : '(대상자 없음)';
-        var timeLabel = s.time ? ('<span style="color:var(--muted);font-size:11px;margin-right:4px;">'+s.time+'</span>') : '';
+        var timeLabel = s.time ? ('<span style="color:var(--muted);font-size:11px;margin-right:4px;">🕐 '+s.time+'</span>') : '<span style="color:var(--muted);font-size:11px;margin-right:4px;">종일</span>';
         var locHtml = locationHtml(s.location);
         var isRecurring = s.recurrence && s.recurrence.type && s.recurrence.type!=='none';
         var recurBadge = isRecurring ? ' <span style="font-size:10px;color:var(--muted);">🔁 반복</span>' : '';
         var recurNote = isRecurring ? '<div style="font-size:10px;color:var(--muted);margin-top:3px;">반복 일정이에요 — "수정"·"전체삭제"는 시리즈 전체에 적용돼요.</div>' : '';
-        return '<div class="note-item"><div class="note-date"><span>'+timeLabel+'<span style="color:'+tCol+';font-weight:700;">['+t+']</span> '+nameLabel+recurBadge+'</span><span class="trash-icon" onclick="deleteSchedule(\''+s.id+'\',\''+dateStr+'\')">'+(isRecurring?'전체삭제':'삭제')+'</span></div><div class="note-text">'+(s.memo||'')+'</div>'+locHtml+recurNote
-          +'<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">'
+        return '<div class="note-item" style="border-left:3px solid '+tCol+';border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.05);">'
+          +'<div class="note-date"><span>'+timeLabel+'<span style="color:'+tCol+';font-weight:700;background:'+tCol+'15;padding:2px 7px;border-radius:5px;">'+t+'</span> <b style="color:var(--text);">'+nameLabel+'</b>'+recurBadge+'</span><span class="trash-icon" onclick="deleteSchedule(\''+s.id+'\',\''+dateStr+'\')">'+(isRecurring?'전체삭제':'삭제')+'</span></div>'
+          +(s.memo?'<div class="note-text">'+s.memo+'</div>':'')+locHtml+recurNote
+          +'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">'
           +'<button class="btn" style="font-size:11px;padding:5px 10px;" onclick="editSchedule(\''+s.id+'\',\''+dateStr+'\')">✏️ 수정</button>'
           +(isRecurring?'<button class="btn" style="font-size:11px;padding:5px 10px;" onclick="cancelSingleOccurrence(\''+s.id+'\',\''+dateStr+'\')">🚫 이번 회차만 취소</button>':'')
           +(p?'<button class="btn" style="font-size:11px;padding:5px 10px;" onclick="openProfile(\''+s.empId+'\')">프로필 보기</button>':'')
           +'</div></div>';
-      }).join('') : '<div class="empty">일정 없음</div>') + '</div>'
+      }).join('') : '<div class="empty" style="padding:18px 0;">📭 예정된 일정이 없어요</div>') + '</div>'
+    + buildActivityLogSectionHtml(dateStr)
     +'<div style="border-top:1px solid var(--bd);padding-top:12px;margin-top:10px;">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'
         +'<div id="sched-form-title" style="font-size:13px;font-weight:700;color:var(--accent);">+ 새 일정 추가</div>'
