@@ -2824,6 +2824,8 @@ function openQuickScheduleModal(empId){
     +'<input type="time" id="qs-time">'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">종료일 (선택, 비우면 당일만 · 여러 날이면 달력에 막대로 이어져 표시돼요)</label>'
     +'<input type="date" id="sched-end-date" min="'+today+'" onchange="toggleRangeVsRecur()">'
+    +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">종료시간 (선택)</label>'
+    +'<input type="time" id="sched-end-time">'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">장소 / 웹미팅 링크</label>'
     +'<input type="text" id="qs-location" placeholder="예: 강남 사무실, 또는 https://zoom.us/...">'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">반복</label>'
@@ -3440,6 +3442,7 @@ function getSchedulesForDate(dateStr){
 }
 var _lastSchedHasTarget = true;
 var _editingScheduleId = null;
+var _editingScheduleOriginDate = null; // 수정 시 원래 시작일 보존 (팝업을 연 날짜와 다를 수 있어서 별도 저장)
 function extractFirstUrl(str){
   if(!str) return null;
   var m = String(str).match(/https?:\/\/\S+/);
@@ -3488,6 +3491,7 @@ function buildActivityLogSectionHtml(dateStr){
 }
 function openDayModal(dateStr){
   _editingScheduleId = null;
+  _editingScheduleOriginDate = null;
   var overlay=document.createElement('div');
   overlay.className='modal-overlay';
   overlay.onclick=function(e){ if(e.target===overlay) overlay.remove(); };
@@ -3509,7 +3513,7 @@ function openDayModal(dateStr){
         var t = s.type||'컨택';
         var tCol = typeBadgeColor[t]||'var(--muted)';
         var nameLabel = p ? (p.name||'?') : '(대상자 없음)';
-        var timeLabel = s.time ? ('<span style="color:var(--muted);font-size:11px;margin-right:4px;">🕐 '+s.time+'</span>') : '<span style="color:var(--muted);font-size:11px;margin-right:4px;">종일</span>';
+        var timeLabel = s.time ? ('<span style="color:var(--muted);font-size:11px;margin-right:4px;">🕐 '+s.time+(s.endTime?'~'+s.endTime:'')+'</span>') : '<span style="color:var(--muted);font-size:11px;margin-right:4px;">종일</span>';
         var locHtml = locationHtml(s.location);
         var isRecurring = s.recurrence && s.recurrence.type && s.recurrence.type!=='none';
         var recurBadge = isRecurring ? ' <span style="font-size:10px;color:var(--muted);">🔁 반복</span>' : '';
@@ -3535,6 +3539,8 @@ function openDayModal(dateStr){
       +'<input type="time" id="sched-time">'
       +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">종료일 (선택, 비우면 당일만 · 여러 날이면 달력에 막대로 이어져 표시돼요)</label>'
       +'<input type="date" id="sched-end-date" min="'+dateStr+'" onchange="toggleRangeVsRecur()">'
+      +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">종료시간 (선택)</label>'
+      +'<input type="time" id="sched-end-time">'
       +'<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin:10px 0 4px;cursor:pointer;white-space:nowrap;">'
         +'<input type="checkbox" id="sched-has-target"'+(_lastSchedHasTarget?' checked':'')+' onchange="toggleSchedTargetFields()"> 대상자 지정'
       +'</label>'
@@ -3617,12 +3623,16 @@ function schedBranchChanged(){
   pEl.innerHTML = ids.map(function(id){return '<option value="'+id+'">'+people[id].name+'</option>';}).join('');
 }
 function saveSchedule(dateStr){
+  var wasEditing = !!_editingScheduleId;
+  // 수정 모드면 팝업을 연 날짜가 아니라, 이 일정의 원래 시작일을 그대로 써야 함 (다른 날짜 팝업에서 열어도 시작일이 안 밀리게)
+  var anchorDate = wasEditing && _editingScheduleOriginDate ? _editingScheduleOriginDate : dateStr;
   var hasTarget = document.getElementById('sched-has-target').checked;
   var empId = hasTarget ? document.getElementById('sched-person').value : '';
   var type = document.getElementById('sched-type').value;
   var time = document.getElementById('sched-time').value;
   var endDate = document.getElementById('sched-end-date').value;
-  if(endDate && endDate < dateStr){ showToast('종료일은 시작일보다 빠를 수 없어요.'); return; }
+  var endTime = document.getElementById('sched-end-time').value;
+  if(endDate && endDate < anchorDate){ showToast('종료일은 시작일보다 빠를 수 없어요.'); return; }
   var location = document.getElementById('sched-location').value.trim();
   var memo = document.getElementById('sched-memo').value.trim();
   if(hasTarget && !empId){ showToast('대상자를 선택하거나, "대상자 지정" 체크를 해제해주세요.'); return; }
@@ -3638,25 +3648,27 @@ function saveSchedule(dateStr){
     }
   }
   _lastSchedHasTarget = hasTarget;
-  var wasEditing = !!_editingScheduleId;
   var id = _editingScheduleId || ('s'+Date.now());
-  var entry={date:dateStr, endDate:(endDate&&endDate!==dateStr?endDate:null), time:time, empId:empId||null, type:type, location:location, memo:memo, done:false, recurrence:recurrence};
+  var entry={date:anchorDate, endDate:(endDate&&endDate!==anchorDate?endDate:null), time:time, endTime:endTime||null, empId:empId||null, type:type, location:location, memo:memo, done:false, recurrence:recurrence};
   fetch(FB_URL+ROOT+'/schedules/'+id+'.json',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(entry)});
   schedules[id]=entry;
   _editingScheduleId = null;
+  _editingScheduleOriginDate = null;
   document.querySelector('.modal-overlay').remove();
   renderCalendar();
   renderDashboard();
-  showToast(wasEditing ? '일정이 수정됐어요.' : (entry.endDate ? (dateStr+' ~ '+entry.endDate+' 일정이 추가됐어요.') : '일정이 추가됐어요.'));
+  showToast(wasEditing ? '일정이 수정됐어요.' : (entry.endDate ? (anchorDate+' ~ '+entry.endDate+' 일정이 추가됐어요.') : '일정이 추가됐어요.'));
 }
 function editSchedule(id, dateStr){
   var s = schedules[id];
   if(!s) return;
   _editingScheduleId = id;
+  _editingScheduleOriginDate = s.date; // 팝업을 연 날짜(dateStr)가 아니라, 이 일정의 진짜 시작일을 저장해둠
   document.getElementById('sched-type').value = s.type||'컨택';
   document.getElementById('sched-time').value = s.time||'';
   document.getElementById('sched-end-date').value = s.endDate||'';
   document.getElementById('sched-end-date').disabled = false;
+  document.getElementById('sched-end-time').value = s.endTime||'';
   document.getElementById('sched-location').value = s.location||'';
   document.getElementById('sched-memo').value = s.memo||'';
   var hasTarget = !!s.empId;
@@ -3684,10 +3696,12 @@ function editSchedule(id, dateStr){
 }
 function cancelEditSchedule(){
   _editingScheduleId = null;
+  _editingScheduleOriginDate = null;
   document.getElementById('sched-type').value = '컨택';
   document.getElementById('sched-time').value = '';
   document.getElementById('sched-end-date').value = '';
   document.getElementById('sched-end-date').disabled = false;
+  document.getElementById('sched-end-time').value = '';
   document.getElementById('sched-location').value = '';
   document.getElementById('sched-memo').value = '';
   document.getElementById('sched-has-target').checked = _lastSchedHasTarget;
