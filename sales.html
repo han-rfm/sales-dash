@@ -160,13 +160,12 @@ tr.row-clickable:hover{background:var(--sf2);}
 
     <!-- DASHBOARD -->
     <div class="view active" id="view-dashboard">
-      <div class="grid-6" style="margin-bottom:16px;">
+      <div class="grid-5" style="margin-bottom:16px;">
         <div class="stat-card"><div class="stat-label">전체 인원</div><div class="stat-val" id="d-total">-</div><div id="d-total-breakdown" style="font-size:10px;color:var(--muted);margin-top:3px;"></div></div>
         <div class="stat-card clickable" onclick="showStatDetail('improved')" style="background:#e5f7ee;"><div class="stat-label" style="color:var(--good);">지표상승인원</div><div class="stat-val" id="d-improved" style="color:var(--good);">-</div></div>
         <div class="stat-card danger clickable" onclick="showStatDetail('declined')"><div class="stat-label">지표하락인원</div><div class="stat-val" id="d-declined">-</div></div>
         <div class="stat-card clickable" onclick="showStatDetail('new')" style="background:#e5f7ee;"><div class="stat-label" style="color:var(--good);">이번달 신규위촉</div><div class="stat-val" id="d-new" style="color:var(--good);">-</div></div>
         <div class="stat-card danger clickable" onclick="showStatDetail('out')"><div class="stat-label">이번달 해촉</div><div class="stat-val" id="d-out">-</div></div>
-        <div class="stat-card clickable" onclick="showStatDetail('termCandidate')" style="background:#fff6e5;"><div class="stat-label" style="color:#8a5a00;">⚠️ 해촉예정자</div><div class="stat-val" id="d-termcandidate" style="color:#8a5a00;">-</div></div>
       </div>
 
       <div class="grid-2" style="margin-bottom:16px;">
@@ -962,12 +961,17 @@ function renderScheduleListInto(elId, list, emptyText){
 }
 function renderDashboard(){
   var ids = Object.keys(people);
-  document.getElementById('d-total').textContent = ids.length;
   var terminatedIds = ids.filter(function(id){ return people[id].terminated; });
   var termCandidateIds = terminationCandidateIds();
-  document.getElementById('d-total-breakdown').textContent =
-    (terminatedIds.length||termCandidateIds.length) ? ('해촉 '+terminatedIds.length+' · 해촉예정 '+termCandidateIds.length) : '';
-  document.getElementById('d-termcandidate').textContent = termCandidateIds.length;
+  var liveCount = ids.length - termCandidateIds.length;
+  document.getElementById('d-total').innerHTML = ids.length
+    + (termCandidateIds.length ? ' <span style="font-size:14px;font-weight:600;color:#8a5a00;">(Live '+liveCount+')</span>' : '');
+  document.getElementById('d-total-breakdown').innerHTML =
+    (terminatedIds.length||termCandidateIds.length)
+      ? ((terminatedIds.length?'<span style="cursor:pointer;text-decoration:underline;" onclick="showStatDetail(\'terminatedAll\')">해촉 '+terminatedIds.length+'</span>':'')
+        + (terminatedIds.length&&termCandidateIds.length?' · ':'')
+        + (termCandidateIds.length?'<span style="cursor:pointer;text-decoration:underline;" onclick="showStatDetail(\'termCandidate\')">소통불가 '+termCandidateIds.length+'</span>':''))
+      : '';
   var declinedIds = ids.filter(function(id){ return swTrend(id).declined; });
   var improvedIds = ids.filter(function(id){ return swTrend(id).improved; });
   document.getElementById('d-declined').textContent = declinedIds.length;
@@ -984,7 +988,7 @@ function renderDashboard(){
   });
   document.getElementById('d-new').textContent = newIds.length;
   document.getElementById('d-out').textContent = outIds.length;
-  _statLists = { declined:declinedIds, improved:improvedIds, new:newIds, out:outIds, termCandidate:termCandidateIds };
+  _statLists = { declined:declinedIds, improved:improvedIds, new:newIds, out:outIds, termCandidate:termCandidateIds, terminatedAll:terminatedIds };
 
   // On-going Engagement: 서베이 응답이 새로 저장될 때마다 +1
   // Reach Point: 전화·문자·만남(컨택메모)·서베이응답 전부 개별 +1
@@ -1571,10 +1575,10 @@ function goOrgFiltered(level, name, type){
   renderOrgList();
 }
 
-var _statLists = { declined:[], improved:[], new:[], out:[] };
+var _statLists = { declined:[], improved:[], new:[], out:[], termCandidate:[], terminatedAll:[] };
 function showStatDetail(type){
   var ids = _statLists[type]||[];
-  var titleMap = { declined:'📉 지표하락인원', improved:'📈 지표상승인원', new:'🆕 이번달 신규위촉', out:'👋 이번달 해촉', termCandidate:'⚠️ 해촉예정자' };
+  var titleMap = { declined:'📉 지표하락인원', improved:'📈 지표상승인원', new:'🆕 이번달 신규위촉', out:'👋 이번달 해촉', termCandidate:'⚠️ 소통불가자', terminatedAll:'🚫 해촉자'};
   var overlay=document.createElement('div');
   overlay.className='modal-overlay';
   overlay.onclick=function(e){ if(e.target===overlay) overlay.remove(); };
@@ -1898,7 +1902,11 @@ function _orgSortVal(row, key){
 }
 function ocTermBadgesHtml(st){
   return (st.term ? '<span style="color:var(--danger);">해촉 '+st.term+'</span>' : '')
-    + (st.termCand ? '<span style="color:#8a5a00;">⚠️해촉예정 '+st.termCand+'</span>' : '');
+    + (st.termCand ? '<span style="color:#8a5a00;">⚠️소통불가 '+st.termCand+'</span>' : '');
+}
+function ocCountHtml(total, st){
+  var real = total - (st.termCand||0);
+  return total+'명'+(st.termCand ? ' <span style="font-size:13px;font-weight:600;color:#8a5a00;">(Live '+real+'명)</span>' : '');
 }
 function renderOrgChartSummary(){
   var el = document.getElementById('org-chart-summary');
@@ -1928,7 +1936,7 @@ function renderOrgChartSummary(){
     +'<div class="org-chip" style="cursor:default;">'
       +'<div class="oc-title">'+fBranch+'</div>'
       +'<div class="oc-sub">AM '+(amName||'-')+'</div>'
-      +'<div class="oc-count">'+ids.length+'명</div>'
+      +'<div class="oc-count">'+ocCountHtml(ids.length, st)+'</div>'
       +'<div class="oc-stats"><span>평균S/W '+st.avgSw+'</span><span style="color:var(--good);">▲'+st.up+'</span><span style="color:var(--danger);">▼'+st.down+'</span>'+ocTermBadgesHtml(st)+'</div>'
     +'</div>';
     return;
@@ -1949,7 +1957,7 @@ function renderOrgChartSummary(){
         return '<div class="org-chip" onclick="drillOrgChart(\'branch\',\''+br+'\')">'
           +'<div class="oc-title">'+br+'</div>'
           +'<div class="oc-sub">AM '+(amName||'-')+'</div>'
-          +'<div class="oc-count">'+ids.length+'명</div>'
+          +'<div class="oc-count">'+ocCountHtml(ids.length, st)+'</div>'
           +'<div class="oc-stats"><span>S/W '+st.avgSw+'</span><span style="color:var(--good);">▲'+st.up+'</span><span style="color:var(--danger);">▼'+st.down+'</span>'+ocTermBadgesHtml(st)+'</div>'
         +'</div>';
       }).join('');
@@ -1967,7 +1975,7 @@ function renderOrgChartSummary(){
     return '<div class="org-chip" onclick="drillOrgChart(\'hq\',\''+hq+'\')">'
       +'<div class="oc-title">'+hq+'</div>'
       +'<div class="oc-sub">MD '+(mdName||'-')+'</div>'
-      +'<div class="oc-count">'+ids.length+'명</div>'
+      +'<div class="oc-count">'+ocCountHtml(ids.length, st)+'</div>'
       +'<div class="oc-stats"><span>S/W '+st.avgSw+'</span><span style="color:var(--good);">▲'+st.up+'</span><span style="color:var(--danger);">▼'+st.down+'</span>'+ocTermBadgesHtml(st)+'</div>'
     +'</div>';
   }).join('') || '<div class="empty">결과 없음</div>';
@@ -2011,7 +2019,10 @@ function getOrgRows(){
       sw:p.sw, lastNote: cStats.latest||'-', contactCount: cStats.count, trend:t, fav:!!p.fav, tags:p.tags||[],
       terminated:!!p.terminated, terminationCandidate:!!(p.terminationCandidate && !p.terminated) };
   });
+  function rowPriority(r){ return r.terminated ? 2 : (r.terminationCandidate ? 1 : 0); } // 활성(0) → 소통불가(1) → 해촉(2) 순으로 항상 하단 고정
   rows.sort(function(a,b){
+    var pa=rowPriority(a), pb=rowPriority(b);
+    if(pa!==pb) return pa-pb;
     var av=_orgSortVal(a,_orgSortKey), bv=_orgSortVal(b,_orgSortKey);
     if(av<bv) return -1*_orgSortDir;
     if(av>bv) return 1*_orgSortDir;
@@ -2030,10 +2041,11 @@ function renderOrgList(){
   if(!rows.length){ tbody.innerHTML='<tr><td colspan="8"><div class="empty">결과 없음</div></td></tr>'; return; }
   tbody.innerHTML = rows.map(function(r){
     var segCol = segColorMap[r.seg]||'#777';
-    return '<tr class="row-clickable" onclick="openProfile(\''+r.id+'\')">'
+    var rowBg = r.terminated ? 'background:#fdeaee;' : (r.terminationCandidate ? 'background:#fff6e5;' : '');
+    return '<tr class="row-clickable" style="'+rowBg+'" onclick="openProfile(\''+r.id+'\')">'
       +'<td>'+(r.fav?'<span style="color:var(--warn);">★</span> ':'')+r.name
         +(r.terminated?' <span class="badge" style="background:#fdeaee;color:var(--danger);font-size:9.5px;padding:1px 5px;">해촉</span>':'')
-        +(r.terminationCandidate?' <span class="badge" style="background:#fff6e5;color:#8a5a00;font-size:9.5px;padding:1px 5px;">해촉예정</span>':'')
+        +(r.terminationCandidate?' <span class="badge" style="background:#fff6e5;color:#8a5a00;font-size:9.5px;padding:1px 5px;">소통불가</span>':'')
       +'</td>'
       +'<td style="color:var(--muted);">'+r.hq+' · '+r.branch+'</td>'
       +'<td><span style="color:'+segCol+';font-weight:700;">'+(r.seg||'-')+'</span></td>'
@@ -2514,11 +2526,11 @@ function buildProfileHtml(empId, p){
   var leftCol = '<div style="margin-bottom:10px;">'+trendBadgeHtml(empId)+'</div>'
   + buildContactDueBadge(empId)
   + (p.terminated ? '<div class="badge" style="background:#fdeaee;color:var(--danger);border:1px solid #f2b8c6;margin-bottom:10px;display:inline-block;">🚫 해촉 처리됨'+(p.terminatedAt?' ('+fmtDate8(p.terminatedAt)+')':'')+' — 서베이·Reach 대상에서 자동 제외돼요</div>' : '')
-  + (!p.terminated && p.terminationCandidate ? '<div class="badge" style="background:#fff6e5;color:#8a5a00;border:1px solid #f3d99a;margin-bottom:10px;display:inline-block;">⚠️ 해촉예정자'+(p.terminationCandidateAt?' ('+fmtDate8(p.terminationCandidateAt)+')':'')+' — 서베이·Reach 대상엔 계속 포함돼요</div>' : '')
+  + (!p.terminated && p.terminationCandidate ? '<div class="badge" style="background:#fff6e5;color:#8a5a00;border:1px solid #f3d99a;margin-bottom:10px;display:inline-block;">⚠️ 소통불가자'+(p.terminationCandidateAt?' ('+fmtDate8(p.terminationCandidateAt)+')':'')+' — 서베이·Reach 대상엔 계속 포함돼요</div>' : '')
   +'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;" id="tags-'+empId+'">'+renderTagsHtml(empId)+'</div>'
   + '<div style="margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap;">'
     + (!p.terminated ? '<span class="badge" style="cursor:pointer;border:1px dashed '+(p.terminationCandidate?'var(--good)':'#e0a300')+';color:'+(p.terminationCandidate?'var(--good)':'#8a5a00')+';" onclick="toggleTerminationCandidate(\''+empId+'\')">'
-      + (p.terminationCandidate ? '↩ 해촉예정 해제' : '⚠️ 해촉예정자로 지정')
+      + (p.terminationCandidate ? '↩ 소통불가 해제' : '⚠️ 소통불가자로 지정')
     + '</span>' : '')
     + '<span class="badge" style="cursor:pointer;border:1px dashed '+(p.terminated?'var(--good)':'var(--danger)')+';color:'+(p.terminated?'var(--good)':'var(--danger)')+';" onclick="toggleTerminated(\''+empId+'\')">'
       + (p.terminated ? '↩ 해촉 취소(복귀 처리)' : '🚫 해촉 처리하기')
@@ -3048,7 +3060,7 @@ function toggleTerminated(empId){
     var now = new Date();
     p.terminatedAt = now.getFullYear()+pad2(now.getMonth()+1)+pad2(now.getDate());
     patch.terminatedAt = p.terminatedAt;
-    // 해촉 처리되는 순간 "해촉예정자" 사전단계 플래그는 정리 (더 이상 필요 없는 상태이므로)
+    // 해촉 처리되는 순간 "소통불가자" 사전단계 플래그는 정리 (더 이상 필요 없는 상태이므로)
     if(p.terminationCandidate){ p.terminationCandidate = false; patch.terminationCandidate = false; }
   }
   fetch(FB_URL+ROOT+'/people/'+empId+'.json',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
@@ -3060,8 +3072,8 @@ function toggleTerminationCandidate(empId){
   var p = people[empId];
   var willFlag = !p.terminationCandidate;
   var msg = willFlag
-    ? (p.name+'님을 해촉예정자로 지정할까요?\n\n해촉 처리와 달리, 서베이·Reach 대상에는 계속 포함돼요. 대시보드·조직도에 "⚠️ 해촉예정자"로 표시돼서 눈에 띄게만 해줘요.')
-    : (p.name+'님의 해촉예정자 지정을 해제할까요?');
+    ? (p.name+'님을 소통불가자로 지정할까요?\n\n해촉 처리와 달리, 서베이·Reach 대상에는 계속 포함돼요. 대시보드·조직도에 "⚠️ 소통불가자"로 표시돼서 눈에 띄게만 해줘요.')
+    : (p.name+'님의 소통불가자 지정을 해제할까요?');
   if(!confirm(msg)) return;
   p.terminationCandidate = willFlag;
   var patch = { terminationCandidate: willFlag };
@@ -3073,7 +3085,7 @@ function toggleTerminationCandidate(empId){
   fetch(FB_URL+ROOT+'/people/'+empId+'.json',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
   openProfile(empId);
   renderDashboard();
-  showToast(willFlag ? '해촉예정자로 지정됐어요.' : '해촉예정자 지정이 해제됐어요.');
+  showToast(willFlag ? '소통불가자로 지정됐어요.' : '소통불가자 지정이 해제됐어요.');
 }
 function daysSinceLastContact(empId){
   var lastNote = latestNoteDate(empId);
