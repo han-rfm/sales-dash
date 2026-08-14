@@ -963,9 +963,9 @@ function renderDashboard(){
   var ids = Object.keys(people);
   var terminatedIds = ids.filter(function(id){ return people[id].terminated; });
   var termCandidateIds = terminationCandidateIds();
-  var liveCount = ids.length - termCandidateIds.length;
+  var liveCount = ids.length - termCandidateIds.length - terminatedIds.length;
   document.getElementById('d-total').innerHTML = ids.length
-    + (termCandidateIds.length ? ' <span style="font-size:14px;font-weight:600;color:#8a5a00;">(Live '+liveCount+')</span>' : '');
+    + ((termCandidateIds.length||terminatedIds.length) ? ' <span style="font-size:14px;font-weight:600;color:#8a5a00;">(Live '+liveCount+')</span>' : '');
   document.getElementById('d-total-breakdown').innerHTML =
     (terminatedIds.length||termCandidateIds.length)
       ? ((terminatedIds.length?'<span style="cursor:pointer;text-decoration:underline;" onclick="showStatDetail(\'terminatedAll\')">해촉 '+terminatedIds.length+'</span>':'')
@@ -1905,8 +1905,9 @@ function ocTermBadgesHtml(st){
     + (st.termCand ? '<span style="color:#8a5a00;">⚠️소통불가 '+st.termCand+'</span>' : '');
 }
 function ocCountHtml(total, st){
-  var real = total - (st.termCand||0);
-  return total+'명'+(st.termCand ? ' <span style="font-size:13px;font-weight:600;color:#8a5a00;">(Live '+real+'명)</span>' : '');
+  var deduct = (st.term||0) + (st.termCand||0);
+  var real = total - deduct;
+  return total+'명'+(deduct ? ' <span style="font-size:13px;font-weight:600;color:#8a5a00;">(Live '+real+'명)</span>' : '');
 }
 function renderOrgChartSummary(){
   var el = document.getElementById('org-chart-summary');
