@@ -41,8 +41,9 @@ input[type=checkbox],input[type=radio]{width:auto;padding:0;border:none;backgrou
 input:focus,select:focus,textarea:focus{border-color:var(--accent);}
 .grid-4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;}
 .grid-5{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;}
+.grid-6{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;}
 .grid-2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;}
-@media(max-width:700px){.grid-4{grid-template-columns:repeat(2,1fr);}.grid-5{grid-template-columns:repeat(2,1fr);}.grid-2{grid-template-columns:1fr;}.cal-cell{min-height:120px;}}
+@media(max-width:700px){.grid-4{grid-template-columns:repeat(2,1fr);}.grid-5{grid-template-columns:repeat(2,1fr);}.grid-6{grid-template-columns:repeat(2,1fr);}.grid-2{grid-template-columns:1fr;}.cal-cell{min-height:120px;}}
 .stat-card{background:var(--sf2);border-radius:10px;padding:12px 14px;}
 .org-chip{background:var(--sf2);border-radius:10px;padding:12px;cursor:pointer;transition:transform .15s;min-width:0;}
 .org-chip:hover{background:var(--sf3);transform:translateY(-2px);}
@@ -159,12 +160,13 @@ tr.row-clickable:hover{background:var(--sf2);}
 
     <!-- DASHBOARD -->
     <div class="view active" id="view-dashboard">
-      <div class="grid-5" style="margin-bottom:16px;">
-        <div class="stat-card"><div class="stat-label">전체 인원</div><div class="stat-val" id="d-total">-</div></div>
+      <div class="grid-6" style="margin-bottom:16px;">
+        <div class="stat-card"><div class="stat-label">전체 인원</div><div class="stat-val" id="d-total">-</div><div id="d-total-breakdown" style="font-size:10px;color:var(--muted);margin-top:3px;"></div></div>
         <div class="stat-card clickable" onclick="showStatDetail('improved')" style="background:#e5f7ee;"><div class="stat-label" style="color:var(--good);">지표상승인원</div><div class="stat-val" id="d-improved" style="color:var(--good);">-</div></div>
         <div class="stat-card danger clickable" onclick="showStatDetail('declined')"><div class="stat-label">지표하락인원</div><div class="stat-val" id="d-declined">-</div></div>
         <div class="stat-card clickable" onclick="showStatDetail('new')" style="background:#e5f7ee;"><div class="stat-label" style="color:var(--good);">이번달 신규위촉</div><div class="stat-val" id="d-new" style="color:var(--good);">-</div></div>
         <div class="stat-card danger clickable" onclick="showStatDetail('out')"><div class="stat-label">이번달 해촉</div><div class="stat-val" id="d-out">-</div></div>
+        <div class="stat-card clickable" onclick="showStatDetail('termCandidate')" style="background:#fff6e5;"><div class="stat-label" style="color:#8a5a00;">⚠️ 해촉예정자</div><div class="stat-val" id="d-termcandidate" style="color:#8a5a00;">-</div></div>
       </div>
 
       <div class="grid-2" style="margin-bottom:16px;">
@@ -536,6 +538,8 @@ var ROOT = '/salesData';
 var people = {};      // empId -> latest profile
 function isActivePerson(id){ return !(people[id] && people[id].terminated); }
 function activePeopleIds(){ return Object.keys(people).filter(isActivePerson); }
+function isTerminationCandidate(id){ var p=people[id]; return !!(p && p.terminationCandidate && !p.terminated); }
+function terminationCandidateIds(){ return Object.keys(people).filter(isTerminationCandidate); }
 var snapshots = {};   // yyyymm -> { empId: {...} }
 var notes = {};       // empId -> { noteId: {...} }
 var contacts = {};    // empId -> { logId: {...} }
@@ -918,6 +922,17 @@ function latestNoteDate(empId){
   var dates = Object.values(n).map(function(x){return x.date;}).filter(Boolean).sort();
   return dates.length ? dates[dates.length-1] : null;
 }
+// 메모(활동기록) + 전화·문자·카카오 등 모든 Reach(contacts)를 합산한 최근 컨택일·누적횟수
+// ⚠ 기존엔 메모(notes)만 반영하고 있어서 실제 전화·문자 Reach가 "최근 컨택"에 안 잡히고 있었음 (2026-08 확인 후 수정)
+function allContactStats(empId){
+  var dates = [];
+  var n = notes[empId];
+  if(n) Object.values(n).forEach(function(x){ if(x.date) dates.push(String(x.date).slice(0,10)); });
+  var c = contacts[empId];
+  if(c) Object.values(c).forEach(function(x){ if(x.date) dates.push(String(x.date).slice(0,10)); });
+  dates.sort();
+  return { latest: dates.length ? dates[dates.length-1] : null, count: dates.length };
+}
 function branchColor(branch){
   var str = branch||'';
   var hash=0;
@@ -948,6 +963,11 @@ function renderScheduleListInto(elId, list, emptyText){
 function renderDashboard(){
   var ids = Object.keys(people);
   document.getElementById('d-total').textContent = ids.length;
+  var terminatedIds = ids.filter(function(id){ return people[id].terminated; });
+  var termCandidateIds = terminationCandidateIds();
+  document.getElementById('d-total-breakdown').textContent =
+    (terminatedIds.length||termCandidateIds.length) ? ('해촉 '+terminatedIds.length+' · 해촉예정 '+termCandidateIds.length) : '';
+  document.getElementById('d-termcandidate').textContent = termCandidateIds.length;
   var declinedIds = ids.filter(function(id){ return swTrend(id).declined; });
   var improvedIds = ids.filter(function(id){ return swTrend(id).improved; });
   document.getElementById('d-declined').textContent = declinedIds.length;
@@ -958,11 +978,13 @@ function renderDashboard(){
   ids.forEach(function(id){
     var p=people[id];
     if(p.joinDate && String(p.joinDate).slice(0,6)===thisYm) newIds.push(id);
-    if(p.rejoinDate && String(p.rejoinDate)!=='99991231' && String(p.rejoinDate).slice(0,6)===thisYm) outIds.push(id);
+    // ⚠ 기존엔 rejoinDate(재위촉일자)를 기준으로 세고 있었는데, 이건 "해촉"과 무관한 필드라 버그였음.
+    // 실제 해촉 처리(terminated) + 처리 시각(terminatedAt) 기준으로 수정 (2026-08 확인 후 수정)
+    if(p.terminated && p.terminatedAt && String(p.terminatedAt).slice(0,6)===thisYm) outIds.push(id);
   });
   document.getElementById('d-new').textContent = newIds.length;
   document.getElementById('d-out').textContent = outIds.length;
-  _statLists = { declined:declinedIds, improved:improvedIds, new:newIds, out:outIds };
+  _statLists = { declined:declinedIds, improved:improvedIds, new:newIds, out:outIds, termCandidate:termCandidateIds };
 
   // On-going Engagement: 서베이 응답이 새로 저장될 때마다 +1
   // Reach Point: 전화·문자·만남(컨택메모)·서베이응답 전부 개별 +1
@@ -1552,7 +1574,7 @@ function goOrgFiltered(level, name, type){
 var _statLists = { declined:[], improved:[], new:[], out:[] };
 function showStatDetail(type){
   var ids = _statLists[type]||[];
-  var titleMap = { declined:'📉 지표하락인원', improved:'📈 지표상승인원', new:'🆕 이번달 신규위촉', out:'👋 이번달 해촉' };
+  var titleMap = { declined:'📉 지표하락인원', improved:'📈 지표상승인원', new:'🆕 이번달 신규위촉', out:'👋 이번달 해촉', termCandidate:'⚠️ 해촉예정자' };
   var overlay=document.createElement('div');
   overlay.className='modal-overlay';
   overlay.onclick=function(e){ if(e.target===overlay) overlay.remove(); };
@@ -1874,6 +1896,10 @@ function _orgSortVal(row, key){
   if(key==='lastNote') return row.lastNote==='-' ? '' : row.lastNote;
   return row[key]||'';
 }
+function ocTermBadgesHtml(st){
+  return (st.term ? '<span style="color:var(--danger);">해촉 '+st.term+'</span>' : '')
+    + (st.termCand ? '<span style="color:#8a5a00;">⚠️해촉예정 '+st.termCand+'</span>' : '');
+}
 function renderOrgChartSummary(){
   var el = document.getElementById('org-chart-summary');
   if(!el) return;
@@ -1886,7 +1912,9 @@ function renderOrgChartSummary(){
     var avgSw = swVals.length ? (swVals.reduce(function(s,v){return s+v;},0)/swVals.length).toFixed(1) : '-';
     var up = ids.filter(function(id){ return swTrend(id).improved; }).length;
     var down = ids.filter(function(id){ return swTrend(id).declined; }).length;
-    return { avgSw:avgSw, up:up, down:down };
+    var term = ids.filter(function(id){ return people[id].terminated; }).length;
+    var termCand = ids.filter(isTerminationCandidate).length;
+    return { avgSw:avgSw, up:up, down:down, term:term, termCand:termCand };
   }
 
   if(fBranch){
@@ -1901,7 +1929,7 @@ function renderOrgChartSummary(){
       +'<div class="oc-title">'+fBranch+'</div>'
       +'<div class="oc-sub">AM '+(amName||'-')+'</div>'
       +'<div class="oc-count">'+ids.length+'명</div>'
-      +'<div class="oc-stats"><span>평균S/W '+st.avgSw+'</span><span style="color:var(--good);">▲'+st.up+'</span><span style="color:var(--danger);">▼'+st.down+'</span></div>'
+      +'<div class="oc-stats"><span>평균S/W '+st.avgSw+'</span><span style="color:var(--good);">▲'+st.up+'</span><span style="color:var(--danger);">▼'+st.down+'</span>'+ocTermBadgesHtml(st)+'</div>'
     +'</div>';
     return;
   }
@@ -1922,7 +1950,7 @@ function renderOrgChartSummary(){
           +'<div class="oc-title">'+br+'</div>'
           +'<div class="oc-sub">AM '+(amName||'-')+'</div>'
           +'<div class="oc-count">'+ids.length+'명</div>'
-          +'<div class="oc-stats"><span>S/W '+st.avgSw+'</span><span style="color:var(--good);">▲'+st.up+'</span><span style="color:var(--danger);">▼'+st.down+'</span></div>'
+          +'<div class="oc-stats"><span>S/W '+st.avgSw+'</span><span style="color:var(--good);">▲'+st.up+'</span><span style="color:var(--danger);">▼'+st.down+'</span>'+ocTermBadgesHtml(st)+'</div>'
         +'</div>';
       }).join('');
     return;
@@ -1940,7 +1968,7 @@ function renderOrgChartSummary(){
       +'<div class="oc-title">'+hq+'</div>'
       +'<div class="oc-sub">MD '+(mdName||'-')+'</div>'
       +'<div class="oc-count">'+ids.length+'명</div>'
-      +'<div class="oc-stats"><span>S/W '+st.avgSw+'</span><span style="color:var(--good);">▲'+st.up+'</span><span style="color:var(--danger);">▼'+st.down+'</span></div>'
+      +'<div class="oc-stats"><span>S/W '+st.avgSw+'</span><span style="color:var(--good);">▲'+st.up+'</span><span style="color:var(--danger);">▼'+st.down+'</span>'+ocTermBadgesHtml(st)+'</div>'
     +'</div>';
   }).join('') || '<div class="empty">결과 없음</div>';
 }
@@ -1978,8 +2006,10 @@ function getOrgRows(){
   var rows = ids.map(function(id){
     var p = people[id];
     var t = swTrend(id);
+    var cStats = allContactStats(id);
     return { id:id, name:p.name||'', hq:p.hq||'', branch:p.branch||'', seg:p.seg||'', cr:p.cr||'', efsr:p.efsr||'',
-      sw:p.sw, lastNote: latestNoteDate(id)||'-', trend:t, fav:!!p.fav, tags:p.tags||[] };
+      sw:p.sw, lastNote: cStats.latest||'-', contactCount: cStats.count, trend:t, fav:!!p.fav, tags:p.tags||[],
+      terminated:!!p.terminated, terminationCandidate:!!(p.terminationCandidate && !p.terminated) };
   });
   rows.sort(function(a,b){
     var av=_orgSortVal(a,_orgSortKey), bv=_orgSortVal(b,_orgSortKey);
@@ -2001,13 +2031,16 @@ function renderOrgList(){
   tbody.innerHTML = rows.map(function(r){
     var segCol = segColorMap[r.seg]||'#777';
     return '<tr class="row-clickable" onclick="openProfile(\''+r.id+'\')">'
-      +'<td>'+(r.fav?'<span style="color:var(--warn);">★</span> ':'')+r.name+'</td>'
+      +'<td>'+(r.fav?'<span style="color:var(--warn);">★</span> ':'')+r.name
+        +(r.terminated?' <span class="badge" style="background:#fdeaee;color:var(--danger);font-size:9.5px;padding:1px 5px;">해촉</span>':'')
+        +(r.terminationCandidate?' <span class="badge" style="background:#fff6e5;color:#8a5a00;font-size:9.5px;padding:1px 5px;">해촉예정</span>':'')
+      +'</td>'
       +'<td style="color:var(--muted);">'+r.hq+' · '+r.branch+'</td>'
       +'<td><span style="color:'+segCol+';font-weight:700;">'+(r.seg||'-')+'</span></td>'
       +'<td>'+(r.cr||'-')+'</td>'
       +'<td>'+(r.efsr||'-')+'</td>'
       +'<td>'+(r.sw!==undefined&&r.sw!==null&&r.sw!==''?r.sw:'-')+'</td>'
-      +'<td style="color:var(--muted);">'+r.lastNote+'</td>'
+      +'<td style="color:var(--muted);">'+r.lastNote+(r.contactCount?' <span style="color:var(--accent);font-weight:600;">(총 '+r.contactCount+'회)</span>':'')+'</td>'
       +'<td>'+trendBadgeHtml(r.id)+'</td>'
       +'</tr>';
   }).join('');
@@ -2015,15 +2048,15 @@ function renderOrgList(){
 function exportOrgListExcel(){
   var rows = getOrgRows();
   if(!rows.length){ showToast('내보낼 데이터가 없어요.'); return; }
-  var aoa = [['이름','본부','지점','Seg','C/R','eFSR','S/W','최근 컨택','전월대비','상반기대비']];
+  var aoa = [['이름','본부','지점','Seg','C/R','eFSR','S/W','최근 컨택','총 컨택횟수','전월대비','상반기대비']];
   rows.forEach(function(r){
     var t=r.trend;
-    aoa.push([r.name, r.hq, r.branch, r.seg, r.cr, r.efsr, (r.sw!==undefined&&r.sw!==null&&r.sw!==''?r.sw:''), r.lastNote,
+    aoa.push([r.name, r.hq, r.branch, r.seg, r.cr, r.efsr, (r.sw!==undefined&&r.sw!==null&&r.sw!==''?r.sw:''), r.lastNote, r.contactCount||0,
       (t.deltaLastMonth!==null?(t.deltaLastMonth>0?'+':'')+t.deltaLastMonth:'-'),
       (t.deltaVsH1!==null?(t.deltaVsH1>0?'+':'')+t.deltaVsH1:'-')]);
   });
   var ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{wch:10},{wch:10},{wch:14},{wch:6},{wch:6},{wch:10},{wch:6},{wch:12},{wch:10},{wch:10}];
+  ws['!cols'] = [{wch:10},{wch:10},{wch:14},{wch:6},{wch:6},{wch:10},{wch:6},{wch:12},{wch:10},{wch:10},{wch:10}];
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '조직도');
   var now = new Date();
@@ -2481,8 +2514,12 @@ function buildProfileHtml(empId, p){
   var leftCol = '<div style="margin-bottom:10px;">'+trendBadgeHtml(empId)+'</div>'
   + buildContactDueBadge(empId)
   + (p.terminated ? '<div class="badge" style="background:#fdeaee;color:var(--danger);border:1px solid #f2b8c6;margin-bottom:10px;display:inline-block;">🚫 해촉 처리됨'+(p.terminatedAt?' ('+fmtDate8(p.terminatedAt)+')':'')+' — 서베이·Reach 대상에서 자동 제외돼요</div>' : '')
+  + (!p.terminated && p.terminationCandidate ? '<div class="badge" style="background:#fff6e5;color:#8a5a00;border:1px solid #f3d99a;margin-bottom:10px;display:inline-block;">⚠️ 해촉예정자'+(p.terminationCandidateAt?' ('+fmtDate8(p.terminationCandidateAt)+')':'')+' — 서베이·Reach 대상엔 계속 포함돼요</div>' : '')
   +'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;" id="tags-'+empId+'">'+renderTagsHtml(empId)+'</div>'
-  + '<div style="margin-bottom:10px;">'
+  + '<div style="margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap;">'
+    + (!p.terminated ? '<span class="badge" style="cursor:pointer;border:1px dashed '+(p.terminationCandidate?'var(--good)':'#e0a300')+';color:'+(p.terminationCandidate?'var(--good)':'#8a5a00')+';" onclick="toggleTerminationCandidate(\''+empId+'\')">'
+      + (p.terminationCandidate ? '↩ 해촉예정 해제' : '⚠️ 해촉예정자로 지정')
+    + '</span>' : '')
     + '<span class="badge" style="cursor:pointer;border:1px dashed '+(p.terminated?'var(--good)':'var(--danger)')+';color:'+(p.terminated?'var(--good)':'var(--danger)')+';" onclick="toggleTerminated(\''+empId+'\')">'
       + (p.terminated ? '↩ 해촉 취소(복귀 처리)' : '🚫 해촉 처리하기')
     + '</span>'
@@ -3011,11 +3048,32 @@ function toggleTerminated(empId){
     var now = new Date();
     p.terminatedAt = now.getFullYear()+pad2(now.getMonth()+1)+pad2(now.getDate());
     patch.terminatedAt = p.terminatedAt;
+    // 해촉 처리되는 순간 "해촉예정자" 사전단계 플래그는 정리 (더 이상 필요 없는 상태이므로)
+    if(p.terminationCandidate){ p.terminationCandidate = false; patch.terminationCandidate = false; }
   }
   fetch(FB_URL+ROOT+'/people/'+empId+'.json',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
   openProfile(empId);
   renderDashboard();
   showToast(willTerminate ? '해촉 처리됐어요.' : '해촉이 취소됐어요.');
+}
+function toggleTerminationCandidate(empId){
+  var p = people[empId];
+  var willFlag = !p.terminationCandidate;
+  var msg = willFlag
+    ? (p.name+'님을 해촉예정자로 지정할까요?\n\n해촉 처리와 달리, 서베이·Reach 대상에는 계속 포함돼요. 대시보드·조직도에 "⚠️ 해촉예정자"로 표시돼서 눈에 띄게만 해줘요.')
+    : (p.name+'님의 해촉예정자 지정을 해제할까요?');
+  if(!confirm(msg)) return;
+  p.terminationCandidate = willFlag;
+  var patch = { terminationCandidate: willFlag };
+  if(willFlag){
+    var now = new Date();
+    p.terminationCandidateAt = now.getFullYear()+pad2(now.getMonth()+1)+pad2(now.getDate());
+    patch.terminationCandidateAt = p.terminationCandidateAt;
+  }
+  fetch(FB_URL+ROOT+'/people/'+empId+'.json',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
+  openProfile(empId);
+  renderDashboard();
+  showToast(willFlag ? '해촉예정자로 지정됐어요.' : '해촉예정자 지정이 해제됐어요.');
 }
 function daysSinceLastContact(empId){
   var lastNote = latestNoteDate(empId);
