@@ -337,6 +337,24 @@ tr.row-clickable:hover{background:var(--sf2);}
           <tbody id="org-rows"></tbody>
         </table>
       </div>
+
+      <div class="card" style="margin-top:14px;">
+        <div class="card-title" style="margin-bottom:4px;">🔲 9-Box 그리드 (현재 필터 기준)</div>
+        <p style="font-size:11.5px;color:var(--muted);margin-bottom:14px;">
+          왼쪽: 기존 C/R 등급(세로 A~C=실적, 가로 1~3=역량) 배치 현황 · 오른쪽: eFSR 형평성 적용 그리드(세로=실적[MIP·SP·건수 상대평가], 가로=활동역량[S/W + TIP 영상수료(위촉월 대비 월평균) 상대평가], 각 상/중/하 33%씩)
+        </p>
+        <div class="grid-2" style="align-items:start;">
+          <div>
+            <div style="font-size:12px;font-weight:700;margin-bottom:8px;">기존 9등급 배치</div>
+            <div id="grid9-official"></div>
+          </div>
+          <div>
+            <div style="font-size:12px;font-weight:700;margin-bottom:8px;">eFSR 형평성 그리드 (실적×활동, 상대평가)</div>
+            <div id="grid9-equity"></div>
+          </div>
+        </div>
+        <div id="grid9-movement" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--bd);"></div>
+      </div>
     </div>
 
     <!-- CALENDAR -->
@@ -533,6 +551,7 @@ var SOLAPI_FROM = '01092925782'; // 세일즈 전용 발신번호 (청소앱은 
 /* ================================================================ */
 
 var ROOT = '/salesData';
+var TIP_VIDEO_DATA_END_YM = '202605'; // TIP 영상수료 누계 데이터의 마지막 집계월 (YYYYMM, 실제 스냅샷 키와 동일 포맷). 엑셀 재업로드 시 이 값도 같이 갱신할 것.
 
 var people = {};      // empId -> latest profile
 function isActivePerson(id){ return !(people[id] && people[id].terminated); }
@@ -1909,6 +1928,155 @@ function ocCountHtml(total, st){
   var real = total - deduct;
   return total+'명'+(deduct ? ' <span style="font-size:13px;font-weight:600;color:#8a5a00;">(Live '+real+'명)</span>' : '');
 }
+/* ---------- 9-BOX GRID (기존 C/R 등급 vs eFSR 형평성 그리드) ---------- */
+// 지정한 필드들의 상대적 위치(percentile, 0=최하위~1=최상위)를 평균내어 종합점수 산출 후
+// 상위33%/중간33%/하위33%로 3단계(0=상,1=중,2=하) 분류
+function percentileTierMap(ids, src, fieldList){
+  var pctByField = {};
+  fieldList.forEach(function(f){
+    var getter = typeof f === 'function' ? f : function(rec){
+      var raw = rec ? rec[f] : undefined;
+      var v = (raw!==undefined && raw!==null && raw!=='') ? Number(raw) : NaN;
+      return v;
+    };
+    var arr = ids.map(function(id){
+      var rec = src[id];
+      var v = getter(rec, id);
+      return { id:id, v: (v===undefined||v===null||isNaN(v)) ? null : v };
+    }).filter(function(x){ return x.v!==null; }).sort(function(a,b){ return a.v-b.v; });
+    var n = arr.length;
+    var rankMap = {};
+    arr.forEach(function(x,i){ rankMap[x.id] = n>1 ? i/(n-1) : 0.5; });
+    pctByField[typeof f==='function' ? f.name||Math.random() : f] = rankMap;
+  });
+  var pctFieldKeys = Object.keys(pctByField);
+  var composite = {};
+  ids.forEach(function(id){
+    var sum=0, cnt=0;
+    pctFieldKeys.forEach(function(k){ if(pctByField[k][id]!==undefined){ sum+=pctByField[k][id]; cnt++; } });
+    composite[id] = cnt ? sum/cnt : null;
+  });
+  var validIds = ids.filter(function(id){ return composite[id]!==null; });
+  var sorted = validIds.slice().sort(function(a,b){ return composite[b]-composite[a]; }); // 내림차순(좋은순)
+  var n = sorted.length;
+  var tierMap = {};
+  sorted.forEach(function(id, idx){
+    var pct = n>1 ? idx/(n-1) : 0;
+    tierMap[id] = pct < 1/3 ? 0 : (pct < 2/3 ? 1 : 2);
+  });
+  return tierMap; // id -> 0(상)/1(중)/2(하)
+}
+// TIP 영상수료를 "위촉월부터 지금까지의 월평균"으로 환산하는 getter 팩토리
+// asOfYm: 이 스냅샷(또는 현재)이 어느 시점 기준 누계인지 (YYYYMM, 6자리 — 실제 스냅샷 키와 동일 포맷) — 위촉 오래된 사람이 누적치만으로 유리해지는 걸 방지
+function makeTipVideoAvgGetter(asOfYm){
+  return function tipVideoAvg(rec){
+    if(!rec || !rec.joinDate || rec.tipVideo===undefined || rec.tipVideo===null || rec.tipVideo==='') return NaN;
+    var jy = Number(String(rec.joinDate).slice(0,4)), jm = Number(String(rec.joinDate).slice(4,6));
+    var ey = Number(asOfYm.slice(0,4)), em = Number(asOfYm.slice(4,6));
+    var months = (ey - jy) * 12 + (em - jm) + 1;
+    if(months < 1) months = 1;
+    var v = Number(rec.tipVideo);
+    return isNaN(v) ? NaN : v / months;
+  };
+}
+var GRID9_PERF_FIELDS = ['avgMip','avgSp','avgCount']; // 세로축(실적)
+function gridActivityFields(asOfYm){ return ['sw', makeTipVideoAvgGetter(asOfYm)]; } // 가로축(활동/역량) — S/W + TIP 영상수료 위촉월 대비 월평균
+function computeEquityTiers(ids, src, asOfYm){
+  var perfTier = percentileTierMap(ids, src, GRID9_PERF_FIELDS);
+  var actTier = percentileTierMap(ids, src, gridActivityFields(asOfYm));
+  var out = {};
+  ids.forEach(function(id){
+    if(perfTier[id]!==undefined && actTier[id]!==undefined) out[id] = { perf:perfTier[id], act:actTier[id] };
+  });
+  return out;
+}
+function grid9CellColor(row, col){ // row:0(위,실적상)~2(아래,실적하) / col:0(왼쪽,역량하)~2(오른쪽,역량상)
+  var score = (2-row) + col; // 0(좌하단,최악)~4(우상단,최상)
+  var palette = ['#E24B4A','#D85A30','#EF9F27','#97C459','#639922'];
+  return palette[score];
+}
+function render9x9GridHtml(matrix, rowLabels, colLabels, total){
+  // matrix[row][col] = count, row 0=위(실적상)~2=아래(실적하), col 0=왼쪽(역량하)~2=오른쪽(역량상)
+  var html = '<table style="width:100%;border-collapse:collapse;font-size:11.5px;">';
+  html += '<tr><td></td>' + colLabels.map(function(c){ return '<td style="text-align:center;color:var(--muted);padding:4px;">'+c+'</td>'; }).join('') + '</tr>';
+  for(var r=0;r<3;r++){
+    html += '<tr><td style="color:var(--muted);padding:4px;white-space:nowrap;">'+rowLabels[r]+'</td>';
+    for(var c=0;c<3;c++){
+      var n = matrix[r][c]||0;
+      var pct = total ? Math.round(n/total*100) : 0;
+      var bg = grid9CellColor(r,c);
+      html += '<td style="padding:2px;">'
+        + '<div style="background:'+bg+'22;border:1px solid '+bg+';border-radius:8px;padding:10px 4px;text-align:center;">'
+        + '<div style="font-size:16px;font-weight:800;color:'+bg+';">'+n+'</div>'
+        + '<div style="font-size:10px;color:var(--muted);">'+pct+'%</div>'
+        + '</div></td>';
+    }
+    html += '</tr>';
+  }
+  html += '</table>';
+  return html;
+}
+function renderGrid9(ids){
+  var total = ids.length;
+  // 1) 기존 C/R 등급 그리드 — 행(세로)=숫자(1~3, 실적), 열(가로)=문자(C~A, 역량)
+  //    C/R 값은 "문자+숫자"(예: A1, C3) 순으로 저장되어 있음: 첫 글자=역량(열), 둘째 글자=실적(행)
+  var officialMatrix = [[0,0,0],[0,0,0],[0,0,0]];
+  var rowIdx = {'1':0,'2':1,'3':2}; // 실적: 1(상)=위, 3(하)=아래
+  var colIdx = {C:0,B:1,A:2}; // 역량: C(하)=왼쪽, A(상)=오른쪽
+  var officialUnclassified = 0;
+  ids.forEach(function(id){
+    var cr = (people[id].cr||'').toUpperCase();
+    var letter = cr.charAt(0), digit = cr.charAt(1);
+    var r = rowIdx[digit], c = colIdx[letter];
+    if(r===undefined || c===undefined){ officialUnclassified++; return; }
+    officialMatrix[r][c]++;
+  });
+  document.getElementById('grid9-official').innerHTML =
+    render9x9GridHtml(officialMatrix, ['1(상)','2(중)','3(하)'], ['C(하)','B(중)','A(상)'], total)
+    + (officialUnclassified ? '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">C/R 미기재 '+officialUnclassified+'명 제외</div>' : '');
+
+  // 2) eFSR 형평성 그리드 — 행=실적(0=상→위, 2=하→아래), 열=활동역량(0=상이지만 오른쪽에 오도록 2-act로 반전)
+  var eqTiers = computeEquityTiers(ids, people, TIP_VIDEO_DATA_END_YM);
+  var equityMatrix = [[0,0,0],[0,0,0],[0,0,0]];
+  Object.keys(eqTiers).forEach(function(id){
+    var t = eqTiers[id];
+    equityMatrix[t.perf][2 - t.act]++; // act 0(상)→열2(오른쪽), act 2(하)→열0(왼쪽)
+  });
+  var equityClassified = Object.keys(eqTiers).length;
+  document.getElementById('grid9-equity').innerHTML =
+    render9x9GridHtml(equityMatrix, ['실적 상','실적 중','실적 하'], ['활동 하','활동 중','활동 상'], equityClassified)
+    + (total-equityClassified ? '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">데이터 부족 '+(total-equityClassified)+'명 제외</div>' : '');
+
+  // 3) 이동현황 — 직전 스냅샷월 대비 형평성 그리드 등급(실적+활동 tier 합, 0~4) 변화
+  var snapKeys = Object.keys(snapshots).sort();
+  var movementHtml = '<div style="font-size:12px;color:var(--muted);">이전 달 데이터가 없어 이동현황을 계산할 수 없어요.</div>';
+  if(snapKeys.length){
+    var priorYm = snapKeys[snapKeys.length-1];
+    var priorSrc = snapshots[priorYm];
+    var priorIds = ids.filter(function(id){ return priorSrc[id]; });
+    var priorTiers = computeEquityTiers(priorIds, priorSrc, priorYm);
+    var up=0, down=0, same=0, compared=0;
+    priorIds.forEach(function(id){
+      var pt = priorTiers[id], ct = eqTiers[id];
+      if(!pt || !ct) return;
+      compared++;
+      var pScore = (2-pt.perf)+(2-pt.act); // 0~4, 높을수록 좋음
+      var cScore = (2-ct.perf)+(2-ct.act);
+      if(cScore>pScore) up++; else if(cScore<pScore) down++; else same++;
+    });
+    if(compared){
+      movementHtml = '<div style="font-size:12px;font-weight:700;margin-bottom:8px;">📊 '+priorYm.slice(2,4)+'.'+priorYm.slice(4,6)+' 대비 이동현황 (형평성 그리드 기준, 비교대상 '+compared+'명)</div>'
+        + '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;">'
+        + '<span style="color:var(--good);">▲ 상승 '+up+'명 ('+Math.round(up/compared*100)+'%)</span>'
+        + '<span style="color:var(--muted);">— 유지 '+same+'명 ('+Math.round(same/compared*100)+'%)</span>'
+        + '<span style="color:var(--danger);">▼ 하락 '+down+'명 ('+Math.round(down/compared*100)+'%)</span>'
+        + '</div>';
+    } else {
+      movementHtml = '<div style="font-size:12px;color:var(--muted);">직전 달과 비교 가능한 인원이 없어요.</div>';
+    }
+  }
+  document.getElementById('grid9-movement').innerHTML = movementHtml;
+}
 function renderOrgChartSummary(){
   var el = document.getElementById('org-chart-summary');
   if(!el) return;
@@ -1923,7 +2091,40 @@ function renderOrgChartSummary(){
     var down = ids.filter(function(id){ return swTrend(id).declined; }).length;
     var term = ids.filter(function(id){ return people[id].terminated; }).length;
     var termCand = ids.filter(isTerminationCandidate).length;
-    return { avgSw:avgSw, up:up, down:down, term:term, termCand:termCand };
+    var segCount = {A:0,B:0,C:0,D:0,E:0};
+    ids.forEach(function(id){ var s=(people[id].seg||'').toUpperCase(); if(segCount.hasOwnProperty(s)) segCount[s]++; });
+    var crGroupCount = {A:0,B:0,C:0};
+    ids.forEach(function(id){ var c=(people[id].cr||'').toUpperCase().charAt(0); if(crGroupCount.hasOwnProperty(c)) crGroupCount[c]++; });
+    return { avgSw:avgSw, up:up, down:down, term:term, termCand:termCand, segCount:segCount, crGroupCount:crGroupCount, total:ids.length };
+  }
+  function ocSegBreakdownHtml(st){
+    var total = st.total || 0;
+    if(!total) return '';
+    var rows = ['A','B','C','D','E'].map(function(k){
+      var n = st.segCount[k]||0;
+      var pct = total ? Math.round((n/total)*100) : 0;
+      return '<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin-top:3px;">'
+        + '<span style="width:12px;font-weight:700;color:'+(segColorMap[k]||'var(--muted)')+';">'+k+'</span>'
+        + '<span style="flex:1;height:6px;background:var(--sf3);border-radius:3px;overflow:hidden;"><span style="display:block;height:100%;width:'+pct+'%;background:'+(segColorMap[k]||'var(--muted)')+';"></span></span>'
+        + '<span style="color:var(--muted);width:62px;text-align:right;">'+n+'명 ('+pct+'%)</span>'
+        + '</div>';
+    }).join('');
+    var crColorMap2 = {A:'#639922',B:'#EF9F27',C:'#E24B4A'};
+    var crRows = ['A','B','C'].map(function(k){
+      var n = st.crGroupCount[k]||0;
+      var pct = total ? Math.round((n/total)*100) : 0;
+      return '<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin-top:3px;">'
+        + '<span style="width:24px;font-weight:700;color:'+crColorMap2[k]+';">'+k+'1~3</span>'
+        + '<span style="flex:1;height:6px;background:var(--sf3);border-radius:3px;overflow:hidden;"><span style="display:block;height:100%;width:'+pct+'%;background:'+crColorMap2[k]+';"></span></span>'
+        + '<span style="color:var(--muted);width:62px;text-align:right;">'+n+'명 ('+pct+'%)</span>'
+        + '</div>';
+    }).join('');
+    return '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--bd);">'
+      + '<div style="font-size:10.5px;color:var(--muted);margin-bottom:2px;">Seg 분포</div>'
+      + rows
+      + '<div style="font-size:10.5px;color:var(--muted);margin-top:8px;margin-bottom:2px;">C/R</div>'
+      + crRows
+      + '</div>';
   }
 
   if(fBranch){
@@ -1939,6 +2140,7 @@ function renderOrgChartSummary(){
       +'<div class="oc-sub">AM '+(amName||'-')+'</div>'
       +'<div class="oc-count">'+ocCountHtml(ids.length, st)+'</div>'
       +'<div class="oc-stats"><span>평균S/W '+st.avgSw+'</span><span style="color:var(--good);">▲'+st.up+'</span><span style="color:var(--danger);">▼'+st.down+'</span>'+ocTermBadgesHtml(st)+'</div>'
+      +ocSegBreakdownHtml(st)
     +'</div>';
     return;
   }
@@ -1960,6 +2162,7 @@ function renderOrgChartSummary(){
           +'<div class="oc-sub">AM '+(amName||'-')+'</div>'
           +'<div class="oc-count">'+ocCountHtml(ids.length, st)+'</div>'
           +'<div class="oc-stats"><span>S/W '+st.avgSw+'</span><span style="color:var(--good);">▲'+st.up+'</span><span style="color:var(--danger);">▼'+st.down+'</span>'+ocTermBadgesHtml(st)+'</div>'
+          +ocSegBreakdownHtml(st)
         +'</div>';
       }).join('');
     return;
@@ -1978,6 +2181,7 @@ function renderOrgChartSummary(){
       +'<div class="oc-sub">MD '+(mdName||'-')+'</div>'
       +'<div class="oc-count">'+ocCountHtml(ids.length, st)+'</div>'
       +'<div class="oc-stats"><span>S/W '+st.avgSw+'</span><span style="color:var(--good);">▲'+st.up+'</span><span style="color:var(--danger);">▼'+st.down+'</span>'+ocTermBadgesHtml(st)+'</div>'
+      +ocSegBreakdownHtml(st)
     +'</div>';
   }).join('') || '<div class="empty">결과 없음</div>';
 }
@@ -2039,6 +2243,7 @@ function renderOrgList(){
 
   var rows = getOrgRows();
   var tbody = document.getElementById('org-rows');
+  renderGrid9(rows.map(function(r){return r.id;}));
   if(!rows.length){ tbody.innerHTML='<tr><td colspan="8"><div class="empty">결과 없음</div></td></tr>'; return; }
   tbody.innerHTML = rows.map(function(r){
     var segCol = segColorMap[r.seg]||'#777';
@@ -2561,7 +2766,11 @@ function buildProfileHtml(empId, p){
   +'</div>'
   +'<p style="font-size:10.5px;color:var(--muted);margin:10px 0 4px;">활동 지표</p>'
   +'<div class="metric-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));">'
-    +metricCell('TIP 영상수료 (25.1~26.05 누계)', p.tipVideo)+metricCell('esMAP 로그인횟수 (26.1~5월 평균)', p.esmapLogin)
+    +(function(){
+        var tv = cumulativeSinceJoin(p.joinDate, TIP_VIDEO_DATA_END_YM, p.tipVideo, '개');
+        return metricCell('TIP 영상수료'+(tv.label?' ('+tv.label+')':''), tv.valueText);
+      })()
+    +metricCell('esMAP 로그인횟수 (26.1~5월 평균)', p.esmapLogin)
   +'</div>'
   +'<p style="font-size:10.5px;color:var(--muted);margin:10px 0 4px;">시상 · 자격</p>'
   +'<div class="metric-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));">'
@@ -2990,6 +3199,22 @@ function applyPhrasingUpdate(){
 }
 function metricCell(k,v,isMoney){
   return '<div class="metric-cell"><div class="k">'+k+'</div><div class="v'+(isMoney?' money':'')+'">'+((v===undefined||v===null||v==='')?'-':v)+'</div></div>';
+}
+// 위촉월 기준 누계 라벨 + 월평균 계산 (예: "TIP 영상수료 (위촉월 26.01)" + "370 (월평균 12개)")
+// dataEndYm: 데이터가 집계된 마지막 월 (YYYYMM, 6자리, 예: '202605') — 엑셀 누계 데이터의 마지막 시점
+function cumulativeSinceJoin(joinDate8, dataEndYm, cumValue, unit){
+  if(!joinDate8 || cumValue===undefined || cumValue===null || cumValue===''){
+    return { label:'', valueText:(cumValue===undefined||cumValue===null||cumValue===''?'-':cumValue) };
+  }
+  var jy = Number(String(joinDate8).slice(0,4)), jm = Number(String(joinDate8).slice(4,6));
+  var ey = Number(dataEndYm.slice(0,4)), em = Number(dataEndYm.slice(4,6));
+  var monthsSinceJoin = (ey - jy) * 12 + (em - jm) + 1; // 위촉월 포함해서 개월 수 (최소 1)
+  if(monthsSinceJoin < 1) monthsSinceJoin = 1;
+  var avg = Math.round((Number(cumValue) / monthsSinceJoin) * 10) / 10;
+  return {
+    label: '위촉월 '+String(joinDate8).slice(2,4)+'.'+String(joinDate8).slice(4,6), // 화면 표시는 2자리 연도로 (내부 계산과 무관)
+    valueText: cumValue + ' <span style="font-size:12px;font-weight:600;color:var(--muted);">(월평균 '+avg+(unit||'')+')</span>'
+  };
 }
 function buildPspCoachingCardHtml(pspRaw){
   var g = pspGuideFor(pspRaw);
