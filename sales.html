@@ -432,6 +432,14 @@ tr.row-clickable:hover{background:var(--sf2);}
       </div>
 
       <div class="card">
+        <div class="card-title" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;" onclick="toggleCollapse('upload-history-body')">🗂 지난 업로드 기록 (월별 스냅샷 관리) <span id="upload-history-body-arrow" style="color:var(--muted);">▸</span></div>
+        <div id="upload-history-body" style="display:none;margin-top:10px;">
+          <p style="font-size:11px;color:var(--muted);margin-bottom:10px;">잘못된 달로 업로드됐거나 중복 업로드된 월을 여기서 직접 삭제할 수 있어요. 삭제하면 그 달의 실적 스냅샷(전원)이 통째로 사라지고, 프로필의 누적평균·9-Box 등 관련 화면에도 바로 반영돼요. <b>되돌릴 수 없으니 신중하게 확인 후 삭제해주세요.</b></p>
+          <div id="upload-history-list"></div>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-title" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;" onclick="toggleCollapse('hq-map-body')">🧑‍💼 본부별 담당 MD <span id="hq-map-body-arrow" style="color:var(--muted);">▸</span></div>
         <div id="hq-map-body" style="display:none;margin-top:10px;">
           <div id="hq-map-rows"></div>
@@ -584,6 +592,40 @@ function computeCumulativeAvg(empId, field, uptoYm){
   });
   var totalMonths = CUMULATIVE_BASELINE_MONTHS + monthsAdded;
   return totalMonths ? sum/totalMonths : null;
+}
+// ⚠ 위 함수는 "값"만 반환해서, 실제로 baseline 이후 이 사람에게 반영된 개월수가 0인지 알 수 없었음
+// (그래서 이 empId에게 8월 실적이 하나도 없어도, 시스템 어딘가에 202608 키만 있으면
+//  "1~8월 누적평균" 섹션이 뜨고 계산값이 7월값과 완전히 동일하게 나오는 오탐 버그가 있었음 — 2026-08 확인)
+// 화면 표시용으로는 이 함수를 써서 "실제로 이 사람에게 반영된 개월수"까지 함께 확인할 것.
+function computeCumulativeAvgDetailed(empId, field, uptoYm){
+  var baseRec = snapshots[CUMULATIVE_BASELINE_YM] && snapshots[CUMULATIVE_BASELINE_YM][empId];
+  if(!baseRec) return null;
+  var baseVal = Number(baseRec[field]);
+  if(isNaN(baseVal)) return null;
+  if(!uptoYm || uptoYm===CUMULATIVE_BASELINE_YM) return {value:baseVal, monthsAdded:0};
+  var sum = baseVal * CUMULATIVE_BASELINE_MONTHS;
+  var monthsAdded = 0;
+  Object.keys(snapshots).filter(function(k){ return k>CUMULATIVE_BASELINE_YM && k<=uptoYm; }).sort().forEach(function(k){
+    var rec = snapshots[k][empId];
+    if(rec && rec[field]!==undefined && rec[field]!==null && rec[field]!==''){
+      var v = Number(rec[field]);
+      if(!isNaN(v)){ sum += v; monthsAdded++; }
+    }
+  });
+  var totalMonths = CUMULATIVE_BASELINE_MONTHS + monthsAdded;
+  return { value: totalMonths ? sum/totalMonths : null, monthsAdded: monthsAdded };
+}
+// 이 사람에게 실제로 baseline 이후 데이터가 반영된 "마지막 달"을 찾음 (전역 latestYm이 아니라 개인 기준)
+function lastContributingYmFor(empId, fields){
+  var keys = Object.keys(snapshots).filter(function(k){ return k>CUMULATIVE_BASELINE_YM; }).sort();
+  var last = null;
+  keys.forEach(function(k){
+    var rec = snapshots[k][empId];
+    if(!rec) return;
+    var hasAny = fields.some(function(f){ return rec[f]!==undefined && rec[f]!==null && rec[f]!==''; });
+    if(hasAny) last = k;
+  });
+  return last;
 }
 
 var people = {};      // empId -> latest profile
@@ -898,6 +940,7 @@ function renderAll(){
   renderConfigSettings();
   renderSurveySettings();
   renderTipLinksSettings();
+  renderUploadHistory();
 }
 
 /* ---------- TABS ---------- */
@@ -2919,13 +2962,18 @@ function buildProfileHtml(empId, p){
     +metricCell('건수', fmtNum(p.avgCount))+metricCell('MIP', fmtMoney(p.avgMip),true)+metricCell('SP', fmtMoney(p.avgSp),true)+metricCell('건당MIP', fmtMoney(p.perMip),true)+metricCell('건당SP', fmtMoney(p.perSp),true)
   +'</div>'
   +(function(){
-      var latestYm = Object.keys(snapshots).sort().pop();
-      if(!latestYm || latestYm===CUMULATIVE_BASELINE_YM) return ''; // 8월 이후 데이터가 아직 없으면 표시 안 함
-      var cumCount = computeCumulativeAvg(empId, 'avgCount', latestYm);
-      var cumMip = computeCumulativeAvg(empId, 'avgMip', latestYm);
-      var cumSp = computeCumulativeAvg(empId, 'avgSp', latestYm);
+      // ⚠ 예전엔 Object.keys(snapshots).sort().pop()으로 "시스템 전체에서 가장 최신 달"을 가져왔는데,
+      // 이러면 이 사람에게 실제 8월 이후 데이터가 하나도 없어도(다른 사람 것이든, 빈 값이든)
+      // 202608 키만 존재하면 "1~8월 누적평균" 섹션이 뜨고 계산값이 7월값과 똑같이 나오는 오탐 버그가 있었음.
+      // 지금은 "이 사람"에게 실제로 avgCount/avgMip/avgSp 중 하나라도 반영된 마지막 달을 직접 찾음.
+      var lastYm = lastContributingYmFor(empId, ['avgCount','avgMip','avgSp']);
+      if(!lastYm) return ''; // 이 사람에게 baseline(7월) 이후 실제 반영된 데이터가 없으면 섹션 자체를 숨김
+      var dCount = computeCumulativeAvgDetailed(empId, 'avgCount', lastYm);
+      var dMip = computeCumulativeAvgDetailed(empId, 'avgMip', lastYm);
+      var dSp = computeCumulativeAvgDetailed(empId, 'avgSp', lastYm);
+      var cumCount = dCount ? dCount.value : null, cumMip = dMip ? dMip.value : null, cumSp = dSp ? dSp.value : null;
       if(cumCount===null && cumMip===null && cumSp===null) return '';
-      return '<p style="font-size:10.5px;color:var(--muted);margin:10px 0 4px;">2026.1~'+Number(latestYm.slice(4,6))+'월 누적평균 (추정, 7월까지는 원본·8월부터는 단월실적 역산)</p>'
+      return '<p style="font-size:10.5px;color:var(--muted);margin:10px 0 4px;">2026.1~'+Number(lastYm.slice(4,6))+'월 누적평균 (추정, 7월까지는 원본·8월부터는 단월실적 역산)</p>'
         +'<div class="metric-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));">'
           +metricCell('건수', cumCount!==null?fmtNum(Math.round(cumCount*10)/10):'-')
           +metricCell('MIP', cumMip!==null?fmtMoney(Math.round(cumMip*10)/10):'-', true)
@@ -4295,8 +4343,13 @@ function showMonthlyDiffModal(prevKey, curKey, prevSnap, curSnap){
 function initUploadPeriod(){
   var yEl=document.getElementById('upload-year'), mEl=document.getElementById('upload-month');
   var now=new Date();
-  for(var y=now.getFullYear()-1;y<=now.getFullYear()+1;y++){ var o=document.createElement('option'); o.value=y; o.textContent=y+'년'; if(y===now.getFullYear())o.selected=true; yEl.appendChild(o); }
-  for(var m=1;m<=12;m++){ var o2=document.createElement('option'); o2.value=m; o2.textContent=m+'월'; if(m===now.getMonth()+1)o2.selected=true; mEl.appendChild(o2); }
+  // ⚠ 업로드는 항상 "전월 마감분"을 올리는 패턴(예: 8월에 7월마감 업로드, 9월에 8월마감 업로드)이므로
+  // 기본값을 '오늘 달'이 아니라 '전월'로 잡음. 이전엔 오늘 달이 기본이라 그대로 업로드하면
+  // 실제로는 전월 데이터인데 이번달 스냅샷으로 잘못 저장되는 사고가 있었음(2026-08 확인).
+  var prevMonthDate = new Date(now.getFullYear(), now.getMonth()-1, 1);
+  var defaultYear = prevMonthDate.getFullYear(), defaultMonth = prevMonthDate.getMonth()+1;
+  for(var y=now.getFullYear()-1;y<=now.getFullYear()+1;y++){ var o=document.createElement('option'); o.value=y; o.textContent=y+'년'; if(y===defaultYear)o.selected=true; yEl.appendChild(o); }
+  for(var m=1;m<=12;m++){ var o2=document.createElement('option'); o2.value=m; o2.textContent=m+'월'; if(m===defaultMonth)o2.selected=true; mEl.appendChild(o2); }
 }
 
 /* ---------- 리포트 ---------- */
@@ -4473,6 +4526,41 @@ function handleExcelUpload(){
     }catch(err){ statusEl.textContent='파일 읽기 실패: '+err; }
   };
   reader.readAsArrayBuffer(fileEl.files[0]);
+}
+
+/* ---------- 지난 업로드 기록(월별 스냅샷) 관리 ---------- */
+function renderUploadHistory(){
+  var el = document.getElementById('upload-history-list');
+  if(!el) return;
+  var yms = Object.keys(snapshots).sort().reverse(); // 최신 달 먼저
+  if(!yms.length){ el.innerHTML = '<div class="empty" style="font-size:12px;">업로드 기록이 없어요.</div>'; return; }
+  el.innerHTML = yms.map(function(ym){
+    var cnt = Object.keys(snapshots[ym]||{}).length;
+    var label = ym.slice(0,4)+'년 '+Number(ym.slice(4,6))+'월';
+    var isBaseline = ym===CUMULATIVE_BASELINE_YM;
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--bd);gap:10px;">'
+      +'<div style="min-width:0;">'
+        +'<div style="font-size:13px;font-weight:700;">'+label+' <span style="font-weight:400;color:var(--muted);font-size:11.5px;">('+cnt+'명, 키: '+ym+')</span>'+(isBaseline?' <span style="font-size:10.5px;color:var(--accent);">· 누적평균 기준월</span>':'')+'</div>'
+      +'</div>'
+      +'<button class="btn" style="flex-shrink:0;font-size:11px;padding:6px 10px;color:var(--danger);border-color:var(--danger);" onclick="deleteUploadSnapshot(\''+ym+'\')">🗑 삭제</button>'
+    +'</div>';
+  }).join('');
+}
+function deleteUploadSnapshot(ym){
+  var cnt = Object.keys(snapshots[ym]||{}).length;
+  var label = ym.slice(0,4)+'년 '+Number(ym.slice(4,6))+'월';
+  var warn = (ym===CUMULATIVE_BASELINE_YM)
+    ? '\n\n⚠ 이 달은 누적평균 계산의 기준월(CUMULATIVE_BASELINE_YM)이에요. 삭제하면 8월 이후 누적평균 계산 전체가 깨질 수 있어요.'
+    : '';
+  if(!confirm(label+' 스냅샷 ('+cnt+'명 분)을 정말 삭제할까요?\n이 달의 실적 데이터가 전원 삭제되며 되돌릴 수 없어요.'+warn)) return;
+  fetch(FB_URL+ROOT+'/snapshots/'+ym+'.json', {method:'DELETE'})
+    .then(function(r){
+      if(!r.ok) throw new Error('삭제 실패');
+      delete snapshots[ym];
+      showToast(label+' 스냅샷 삭제 완료');
+      renderAll();
+    })
+    .catch(function(err){ showToast('삭제 실패: '+err); });
 }
 
 /* ---------- SETTINGS: ORG MAP ---------- */
