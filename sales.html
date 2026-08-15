@@ -263,7 +263,7 @@ tr.row-clickable:hover{background:var(--sf2);}
 
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-          <div class="card-title" style="margin:0;">🏢 본부별 실적 요약 (2026.1~5월 업적평균)</div>
+          <div class="card-title" style="margin:0;">🏢 본부별 실적 요약 (2026.1~7월 업적평균, 원본)</div>
           <select id="hq-metric-select" onchange="renderHqChart(Object.keys(people))" style="width:auto;font-size:12px;padding:6px 10px;">
             <option value="avgCount">건수</option>
             <option value="avgMip">MIP</option>
@@ -561,6 +561,30 @@ var SOLAPI_FROM = '01092925782'; // 세일즈 전용 발신번호 (청소앱은 
 
 var ROOT = '/salesData';
 var TIP_VIDEO_DATA_END_YM = '202605'; // TIP 영상수료 누계 데이터의 마지막 집계월 (YYYYMM, 실제 스냅샷 키와 동일 포맷). 엑셀 재업로드 시 이 값도 같이 갱신할 것.
+// avgMip/avgSp/avgCount가 "1~N월 누적평균"으로 입력된 마지막 시점. 이 시점 이후로는 단월 실적이 입력됨.
+// (2026년 7월분까지는 "1~7월 누적평균"으로 엑셀에 담겨 있었고, 8월부터는 그 달 하나만의 단월 실적으로 입력 방식이 바뀜)
+var CUMULATIVE_BASELINE_YM = '202607';
+var CUMULATIVE_BASELINE_MONTHS = 7; // 위 시점까지 누적된 개월 수(1~7월=7개월)
+// 위 baseline 이후 매달 입력되는 "단월" 실적을 역산해서 "1~N월 누적평균(추정)"을 계산
+// (baseline평균×baseline개월수 + baseline 이후 각 달의 단월값 합) ÷ 실제 존재하는 개월수
+function computeCumulativeAvg(empId, field, uptoYm){
+  var baseRec = snapshots[CUMULATIVE_BASELINE_YM] && snapshots[CUMULATIVE_BASELINE_YM][empId];
+  if(!baseRec) return null;
+  var baseVal = Number(baseRec[field]);
+  if(isNaN(baseVal)) return null;
+  if(!uptoYm || uptoYm===CUMULATIVE_BASELINE_YM) return baseVal;
+  var sum = baseVal * CUMULATIVE_BASELINE_MONTHS;
+  var monthsAdded = 0;
+  Object.keys(snapshots).filter(function(k){ return k>CUMULATIVE_BASELINE_YM && k<=uptoYm; }).sort().forEach(function(k){
+    var rec = snapshots[k][empId];
+    if(rec && rec[field]!==undefined && rec[field]!==null && rec[field]!==''){
+      var v = Number(rec[field]);
+      if(!isNaN(v)){ sum += v; monthsAdded++; }
+    }
+  });
+  var totalMonths = CUMULATIVE_BASELINE_MONTHS + monthsAdded;
+  return totalMonths ? sum/totalMonths : null;
+}
 
 var people = {};      // empId -> latest profile
 function isActivePerson(id){ return !(people[id] && people[id].terminated); }
@@ -2890,10 +2914,24 @@ function buildProfileHtml(empId, p){
     +metricCell('H/C', p.hc)+metricCell('BNW', p.bnw)+metricCell('S/W', p.sw)+metricCell('변액', p.byunaek?p.byunaek:'보유')
   +'</div>'
   + buildPspCoachingCardHtml(p.psp)
-  +'<p style="font-size:10.5px;color:var(--muted);margin:10px 0 4px;">2026.1~5월 업적평균 (단위: 건, 천원)</p>'
+  +'<p style="font-size:10.5px;color:var(--muted);margin:10px 0 4px;">2026.1~7월 업적평균 (원본, 단위: 건, 천원)</p>'
   +'<div class="metric-grid" style="grid-template-columns:repeat(5,minmax(0,1fr));">'
     +metricCell('건수', fmtNum(p.avgCount))+metricCell('MIP', fmtMoney(p.avgMip),true)+metricCell('SP', fmtMoney(p.avgSp),true)+metricCell('건당MIP', fmtMoney(p.perMip),true)+metricCell('건당SP', fmtMoney(p.perSp),true)
   +'</div>'
+  +(function(){
+      var latestYm = Object.keys(snapshots).sort().pop();
+      if(!latestYm || latestYm===CUMULATIVE_BASELINE_YM) return ''; // 8월 이후 데이터가 아직 없으면 표시 안 함
+      var cumCount = computeCumulativeAvg(empId, 'avgCount', latestYm);
+      var cumMip = computeCumulativeAvg(empId, 'avgMip', latestYm);
+      var cumSp = computeCumulativeAvg(empId, 'avgSp', latestYm);
+      if(cumCount===null && cumMip===null && cumSp===null) return '';
+      return '<p style="font-size:10.5px;color:var(--muted);margin:10px 0 4px;">2026.1~'+Number(latestYm.slice(4,6))+'월 누적평균 (추정, 7월까지는 원본·8월부터는 단월실적 역산)</p>'
+        +'<div class="metric-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));">'
+          +metricCell('건수', cumCount!==null?fmtNum(Math.round(cumCount*10)/10):'-')
+          +metricCell('MIP', cumMip!==null?fmtMoney(Math.round(cumMip*10)/10):'-', true)
+          +metricCell('SP', cumSp!==null?fmtMoney(Math.round(cumSp*10)/10):'-', true)
+        +'</div>';
+    })()
   +'<p style="font-size:10.5px;color:var(--muted);margin:10px 0 4px;">활동 지표</p>'
   +'<div class="metric-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));">'
     +(function(){
