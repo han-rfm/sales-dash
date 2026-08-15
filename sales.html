@@ -1946,7 +1946,17 @@ function percentileTierMap(ids, src, fieldList){
     }).filter(function(x){ return x.v!==null; }).sort(function(a,b){ return a.v-b.v; });
     var n = arr.length;
     var rankMap = {};
-    arr.forEach(function(x,i){ rankMap[x.id] = n>1 ? i/(n-1) : 0.5; });
+    // ⚠ 동점자(예: 여러 명이 똑같이 0) 처리: 배열 순서대로 서로 다른 순위를 주면 안 되고,
+    // 같은 값끼리는 "평균 순위"로 묶어서 똑같은 percentile을 줘야 함 (2026-08 확인 후 수정)
+    var i = 0;
+    while(i < n){
+      var j = i;
+      while(j+1 < n && arr[j+1].v === arr[i].v) j++; // [i..j] 구간이 전부 같은 값
+      var avgIdx = (i + j) / 2;
+      var pct = n>1 ? avgIdx/(n-1) : 0.5;
+      for(var k=i;k<=j;k++) rankMap[arr[k].id] = pct;
+      i = j + 1;
+    }
     pctByField[typeof f==='function' ? f.name||Math.random() : f] = rankMap;
   });
   var pctFieldKeys = Object.keys(pctByField);
@@ -1981,12 +1991,38 @@ function makeTipVideoAvgGetter(asOfYm){
 }
 var GRID9_PERF_FIELDS = ['avgMip','avgSp','avgCount']; // 세로축(실적)
 function gridActivityFields(asOfYm){ return ['sw', makeTipVideoAvgGetter(asOfYm)]; } // 가로축(활동/역량) — S/W + TIP 영상수료 위촉월 대비 월평균
+// 해당 축의 모든 필드가 0이거나 결측이면(=활동 흔적이 전혀 없으면) true 반환
+// → 상대평가(동점자 평균순위)로 인해 "다 같이 0인 사람들"이 어부지리로 중간 등급을 받는 걸 막기 위한 floor 규칙
+// (정훈님 확정: 계속 0인 사람은 등급이 오를 수 없다 — C3는 C3 그대로. 반대로 조금이라도 실적/활동이 있으면 정상적으로 재평가)
+function computeAxisZeroFlag(ids, src, fieldList){
+  var getters = fieldList.map(function(f){
+    return typeof f==='function' ? f : function(rec){
+      var raw = rec ? rec[f] : undefined;
+      return (raw!==undefined && raw!==null && raw!=='') ? Number(raw) : NaN;
+    };
+  });
+  var flag = {};
+  ids.forEach(function(id){
+    var rec = src[id];
+    var anyPositive = getters.some(function(g){ var v=g(rec,id); return !isNaN(v) && v>0; });
+    flag[id] = !anyPositive;
+  });
+  return flag;
+}
 function computeEquityTiers(ids, src, asOfYm){
+  var actFields = gridActivityFields(asOfYm);
   var perfTier = percentileTierMap(ids, src, GRID9_PERF_FIELDS);
-  var actTier = percentileTierMap(ids, src, gridActivityFields(asOfYm));
+  var actTier = percentileTierMap(ids, src, actFields);
+  var perfZero = computeAxisZeroFlag(ids, src, GRID9_PERF_FIELDS);
+  var actZero = computeAxisZeroFlag(ids, src, actFields);
   var out = {};
   ids.forEach(function(id){
-    if(perfTier[id]!==undefined && actTier[id]!==undefined) out[id] = { perf:perfTier[id], act:actTier[id] };
+    if(perfTier[id]!==undefined && actTier[id]!==undefined){
+      out[id] = {
+        perf: perfZero[id] ? 2 : perfTier[id], // 실적 흔적 전혀 없으면 무조건 하(2)
+        act: actZero[id] ? 2 : actTier[id]      // 활동 흔적 전혀 없으면 무조건 하(2)
+      };
+    }
   });
   return out;
 }
@@ -1995,7 +2031,8 @@ function grid9CellColor(row, col){ // row:0(위,실적상)~2(아래,실적하) /
   var palette = ['#E24B4A','#D85A30','#EF9F27','#97C459','#639922'];
   return palette[score];
 }
-function render9x9GridHtml(matrix, rowLabels, colLabels, total){
+var _grid9Data = { official:null, equity:null }; // gridKey -> 3x3 배열, 각 칸에 id 배열
+function render9x9GridHtml(matrix, rowLabels, colLabels, total, gridKey){
   // matrix[row][col] = count, row 0=위(실적상)~2=아래(실적하), col 0=왼쪽(역량하)~2=오른쪽(역량상)
   var html = '<table style="width:100%;border-collapse:collapse;font-size:11.5px;">';
   html += '<tr><td></td>' + colLabels.map(function(c){ return '<td style="text-align:center;color:var(--muted);padding:4px;">'+c+'</td>'; }).join('') + '</tr>';
@@ -2005,8 +2042,8 @@ function render9x9GridHtml(matrix, rowLabels, colLabels, total){
       var n = matrix[r][c]||0;
       var pct = total ? Math.round(n/total*100) : 0;
       var bg = grid9CellColor(r,c);
-      html += '<td style="padding:2px;">'
-        + '<div style="background:'+bg+'22;border:1px solid '+bg+';border-radius:8px;padding:10px 4px;text-align:center;">'
+      html += '<td style="padding:2px;" onclick="openGrid9Cell(\''+gridKey+'\','+r+','+c+')">'
+        + '<div style="background:'+bg+'22;border:1px solid '+bg+';border-radius:8px;padding:10px 4px;text-align:center;'+(n?'cursor:pointer;':'')+'" '+(n?'onmouseover="this.style.opacity=0.75" onmouseout="this.style.opacity=1"':'')+'>'
         + '<div style="font-size:16px;font-weight:800;color:'+bg+';">'+n+'</div>'
         + '<div style="font-size:10px;color:var(--muted);">'+pct+'%</div>'
         + '</div></td>';
@@ -2016,11 +2053,42 @@ function render9x9GridHtml(matrix, rowLabels, colLabels, total){
   html += '</table>';
   return html;
 }
+function openGrid9Cell(gridKey, r, c){
+  var ids = (_grid9Data[gridKey] && _grid9Data[gridKey][r] && _grid9Data[gridKey][r][c]) || [];
+  if(!ids.length){ showToast('해당 칸에 대상자가 없어요.'); return; }
+  var title = gridKey==='official' ? '기존 9등급 배치' : 'eFSR 확장평가 C/R';
+  // 확장평가 그리드는 칸 자체가 곧 그 사람의 확장평가 위치(예: B1) — 같은 칸 안 사람은 전부 같은 라벨을 가짐
+  var COL_LETTER = ['C','B','A']; // col0=왼쪽(하)=C, col2=오른쪽(상)=A
+  var ROW_DIGIT = ['1','2','3'];
+  var equityLabel = gridKey==='equity' ? (COL_LETTER[c]+ROW_DIGIT[r]) : null;
+  var overlay=document.createElement('div');
+  overlay.className='modal-overlay';
+  var box=document.createElement('div');
+  box.className='modal-box';
+  box.innerHTML = '<button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button>'
+    +'<div class="card-title" style="margin-bottom:10px;">🔲 '+title+' — 대상자 ('+ids.length+'명)</div>'
+    +'<div style="max-height:400px;overflow-y:auto;">'
+      + ids.map(function(id){
+          var p = people[id];
+          if(!p) return '';
+          var statusHtml = equityLabel
+            ? '<span style="color:var(--muted);font-size:12px;">'+(p.cr||'-')+' <span style="color:var(--accent);font-weight:700;">&gt; '+equityLabel+'</span></span>'
+            : '<span style="color:var(--muted);font-size:12px;">'+(p.cr||'-')+'</span>';
+          return '<div class="row-clickable" style="padding:9px 4px;border-bottom:1px solid var(--bd);cursor:pointer;display:flex;justify-content:space-between;align-items:center;" onclick="this.closest(\'.modal-overlay\').remove();openProfile(\''+id+'\')">'
+            + '<span><b>'+(p.name||'-')+'</b> <span style="color:var(--muted);font-size:12px;">'+(p.hq||'')+' · '+(p.branch||'')+'</span></span>'
+            + statusHtml
+            + '</div>';
+        }).join('')
+    +'</div>';
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
 function renderGrid9(ids){
   var total = ids.length;
   // 1) 기존 C/R 등급 그리드 — 행(세로)=숫자(1~3, 실적), 열(가로)=문자(C~A, 역량)
   //    C/R 값은 "문자+숫자"(예: A1, C3) 순으로 저장되어 있음: 첫 글자=역량(열), 둘째 글자=실적(행)
   var officialMatrix = [[0,0,0],[0,0,0],[0,0,0]];
+  var officialIdMatrix = [[[],[],[]],[[],[],[]],[[],[],[]]];
   var rowIdx = {'1':0,'2':1,'3':2}; // 실적: 1(상)=위, 3(하)=아래
   var colIdx = {C:0,B:1,A:2}; // 역량: C(하)=왼쪽, A(상)=오른쪽
   var officialUnclassified = 0;
@@ -2030,21 +2098,27 @@ function renderGrid9(ids){
     var r = rowIdx[digit], c = colIdx[letter];
     if(r===undefined || c===undefined){ officialUnclassified++; return; }
     officialMatrix[r][c]++;
+    officialIdMatrix[r][c].push(id);
   });
+  _grid9Data.official = officialIdMatrix;
   document.getElementById('grid9-official').innerHTML =
-    render9x9GridHtml(officialMatrix, ['1(상)','2(중)','3(하)'], ['C(하)','B(중)','A(상)'], total)
+    render9x9GridHtml(officialMatrix, ['1(상)','2(중)','3(하)'], ['C(하)','B(중)','A(상)'], total, 'official')
     + (officialUnclassified ? '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">C/R 미기재 '+officialUnclassified+'명 제외</div>' : '');
 
   // 2) eFSR 확장평가 C/R — 행=실적(0=상→위, 2=하→아래), 열=활동역량(0=상이지만 오른쪽에 오도록 2-act로 반전)
   var eqTiers = computeEquityTiers(ids, people, TIP_VIDEO_DATA_END_YM);
   var equityMatrix = [[0,0,0],[0,0,0],[0,0,0]];
+  var equityIdMatrix = [[[],[],[]],[[],[],[]],[[],[],[]]];
   Object.keys(eqTiers).forEach(function(id){
     var t = eqTiers[id];
-    equityMatrix[t.perf][2 - t.act]++; // act 0(상)→열2(오른쪽), act 2(하)→열0(왼쪽)
+    var col = 2 - t.act; // act 0(상)→열2(오른쪽), act 2(하)→열0(왼쪽)
+    equityMatrix[t.perf][col]++;
+    equityIdMatrix[t.perf][col].push(id);
   });
+  _grid9Data.equity = equityIdMatrix;
   var equityClassified = Object.keys(eqTiers).length;
   document.getElementById('grid9-equity').innerHTML =
-    render9x9GridHtml(equityMatrix, ['실적 상','실적 중','실적 하'], ['활동 하','활동 중','활동 상'], equityClassified)
+    render9x9GridHtml(equityMatrix, ['실적 상','실적 중','실적 하'], ['활동 하','활동 중','활동 상'], equityClassified, 'equity')
     + (total-equityClassified ? '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">데이터 부족 '+(total-equityClassified)+'명 제외</div>' : '');
 
   // 3) 이동현황 — 직전 스냅샷월 대비 확장평가 C/R 등급(실적+활동 tier 합, 0~4) 변화
