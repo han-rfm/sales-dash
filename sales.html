@@ -332,6 +332,7 @@ tr.row-clickable:hover{background:var(--sf2);}
             <th class="sortable" onclick="toggleOrgSort('efsr')">eFSR<span class="arrow" id="arrow-efsr"></span></th>
             <th class="sortable" onclick="toggleOrgSort('sw')">S/W<span class="arrow" id="arrow-sw"></span></th>
             <th class="sortable" onclick="toggleOrgSort('lastNote')">최근 컨택<span class="arrow" id="arrow-lastNote"></span></th>
+            <th class="sortable" onclick="toggleOrgSort('surveyThisMonth')">서베이<span class="arrow" id="arrow-surveyThisMonth"></span></th>
             <th class="sortable" onclick="toggleOrgSort('risk')">상태<span class="arrow" id="arrow-risk"></span></th>
           </tr></thead>
           <tbody id="org-rows"></tbody>
@@ -1995,6 +1996,7 @@ function _orgSortVal(row, key){
   if(key==='risk') return row.trend.declined ? -1 : (row.trend.improved ? 1 : 0);
   if(key==='sw') return row.sw===undefined||row.sw===null||row.sw==='' ? -1 : Number(row.sw);
   if(key==='lastNote') return row.lastNote==='-' ? '' : row.lastNote;
+  if(key==='surveyThisMonth') return row.surveyThisMonth ? 1 : 0;
   return row[key]||'';
 }
 function ocTermBadgesHtml(st){
@@ -2412,12 +2414,16 @@ function getOrgRows(){
     }
     return true;
   });
+  var thisMonthPrefix = new Date().getFullYear()+'-'+pad2(new Date().getMonth()+1);
   var rows = ids.map(function(id){
     var p = people[id];
     var t = swTrend(id);
     var cStats = allContactStats(id);
+    var resp = surveyResponses[id];
+    var surveyThisMonth = !!(resp && Object.values(resp).some(function(r){ return r.submittedAt && r.submittedAt.slice(0,7)===thisMonthPrefix; }));
     return { id:id, name:p.name||'', hq:p.hq||'', branch:p.branch||'', seg:p.seg||'', cr:p.cr||'', efsr:p.efsr||'',
       sw:p.sw, lastNote: cStats.latest||'-', contactCount: cStats.count, trend:t, fav:!!p.fav, tags:p.tags||[],
+      surveyThisMonth: surveyThisMonth,
       terminated:!!p.terminated, terminationCandidate:!!(p.terminationCandidate && !p.terminated) };
   });
   function rowPriority(r){ return r.terminated ? 2 : (r.terminationCandidate ? 1 : 0); } // 활성(0) → 소통불가(1) → 해촉(2) 순으로 항상 하단 고정
@@ -2441,7 +2447,7 @@ function renderOrgList(){
   var tbody = document.getElementById('org-rows');
   var grid9ViewYmEl = document.getElementById('grid9-view-ym');
   renderGrid9(rows.map(function(r){return r.id;}), grid9ViewYmEl ? grid9ViewYmEl.value : '');
-  if(!rows.length){ tbody.innerHTML='<tr><td colspan="8"><div class="empty">결과 없음</div></td></tr>'; return; }
+  if(!rows.length){ tbody.innerHTML='<tr><td colspan="9"><div class="empty">결과 없음</div></td></tr>'; return; }
   tbody.innerHTML = rows.map(function(r){
     var segCol = segColorMap[r.seg]||'#777';
     var rowBg = r.terminated ? 'background:#fdeaee;' : (r.terminationCandidate ? 'background:#fff6e5;' : '');
@@ -2456,6 +2462,9 @@ function renderOrgList(){
       +'<td>'+(r.efsr||'-')+'</td>'
       +'<td>'+(r.sw!==undefined&&r.sw!==null&&r.sw!==''?r.sw:'-')+'</td>'
       +'<td style="color:var(--muted);">'+r.lastNote+(r.contactCount?' <span style="color:var(--accent);font-weight:600;">(총 '+r.contactCount+'회)</span>':'')+'</td>'
+      +'<td>'+(r.surveyThisMonth
+          ? '<span class="badge" style="background:#e6f6ee;color:var(--good);font-size:10.5px;padding:2px 6px;">✅ 제출</span>'
+          : '<span class="badge" style="background:#fdeaee;color:var(--danger);font-size:10.5px;padding:2px 6px;">❌ 미제출</span>')+'</td>'
       +'<td>'+trendBadgeHtml(r.id)+'</td>'
       +'</tr>';
   }).join('');
@@ -2463,15 +2472,16 @@ function renderOrgList(){
 function exportOrgListExcel(){
   var rows = getOrgRows();
   if(!rows.length){ showToast('내보낼 데이터가 없어요.'); return; }
-  var aoa = [['이름','본부','지점','Seg','C/R','eFSR','S/W','최근 컨택','총 컨택횟수','전월대비','상반기대비']];
+  var aoa = [['이름','본부','지점','Seg','C/R','eFSR','S/W','최근 컨택','총 컨택횟수','서베이','전월대비','상반기대비']];
   rows.forEach(function(r){
     var t=r.trend;
     aoa.push([r.name, r.hq, r.branch, r.seg, r.cr, r.efsr, (r.sw!==undefined&&r.sw!==null&&r.sw!==''?r.sw:''), r.lastNote, r.contactCount||0,
+      (r.surveyThisMonth?'제출':'미제출'),
       (t.deltaLastMonth!==null?(t.deltaLastMonth>0?'+':'')+t.deltaLastMonth:'-'),
       (t.deltaVsH1!==null?(t.deltaVsH1>0?'+':'')+t.deltaVsH1:'-')]);
   });
   var ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [{wch:10},{wch:10},{wch:14},{wch:6},{wch:6},{wch:10},{wch:6},{wch:12},{wch:10},{wch:10},{wch:10}];
+  ws['!cols'] = [{wch:10},{wch:10},{wch:14},{wch:6},{wch:6},{wch:10},{wch:6},{wch:12},{wch:10},{wch:10},{wch:10},{wch:10}];
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '조직도');
   var now = new Date();
