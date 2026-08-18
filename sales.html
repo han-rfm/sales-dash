@@ -332,7 +332,7 @@ tr.row-clickable:hover{background:var(--sf2);}
             <th class="sortable" onclick="toggleOrgSort('efsr')">eFSR<span class="arrow" id="arrow-efsr"></span></th>
             <th class="sortable" onclick="toggleOrgSort('sw')">S/W<span class="arrow" id="arrow-sw"></span></th>
             <th class="sortable" onclick="toggleOrgSort('lastNote')">최근 컨택<span class="arrow" id="arrow-lastNote"></span></th>
-            <th class="sortable" onclick="toggleOrgSort('surveyThisMonth')">서베이<span class="arrow" id="arrow-surveyThisMonth"></span></th>
+            <th class="sortable" onclick="toggleOrgSort('surveySubmitted')">서베이<span class="arrow" id="arrow-surveySubmitted"></span></th>
             <th class="sortable" onclick="toggleOrgSort('risk')">상태<span class="arrow" id="arrow-risk"></span></th>
           </tr></thead>
           <tbody id="org-rows"></tbody>
@@ -667,6 +667,7 @@ function fillTemplate(str, vars){
 }
 var surveyTemplate = null;   // { sections: [ {id,title,visibility:'shared'|'private',academicNote,fields:[{id,label,type,options,reverseScored}]} ] }
 var surveyResponses = {};    // empId -> { responseId: { submittedAt, sections:[{title,items:[{label,value}]}] } }
+var surveyReopened = {};     // empId -> true : 정훈님이 '재참여 허용' 누른 사람. 서베이 제출 완료되면 자동 잠김(플래그 삭제)
 
 // 5점 리커트 척도 공통 옵션 (scale 타입 필드는 항상 이 5개 사용)
 var SCALE_OPTIONS = ['매우 그렇다','그렇다','보통이다','그렇지 않다','전혀 그렇지 않다'];
@@ -890,7 +891,8 @@ function boot(){
     fetch(FB_URL+ROOT+'/surveyResponses.json').then(function(r){return r.json();}),
     fetch(FB_URL+ROOT+'/fmMap.json').then(function(r){return r.json();}),
     fetch(FB_URL+ROOT+'/tipLinks.json').then(function(r){return r.json();}),
-    fetch(FB_URL+ROOT+'/surveyScoreSnapshots.json').then(function(r){return r.json();})
+    fetch(FB_URL+ROOT+'/surveyScoreSnapshots.json').then(function(r){return r.json();}),
+    fetch(FB_URL+ROOT+'/surveyReopened.json').then(function(r){return r.json();})
   ]).then(function(res){
     people = res[0]||{};
     snapshots = res[1]||{};
@@ -912,6 +914,7 @@ function boot(){
     fmMap = res[10]||{};
     tipLinks = res[11]||{};
     surveyScoreSnapshots = res[12]||{};
+    surveyReopened = res[13]||{};
     if(res[8]){
       surveyTemplate = res[8];
       // 라벨·기준값은 절대 건드리지 않고, 필드id가 일치하는데 S/W 태그가 비어있는 곳만 조용히 채워넣음
@@ -1254,7 +1257,7 @@ function renderWeeklyRoutine(ids){
     + section('esmap', '📶', 'esMAP 로그인 '+esmapTh+'회 미만', g.esmapLow, 'var(--danger)')
     + section('tip', '🎬', 'TIP 영상수료 '+tipTh+'건 미만', g.tipLow, 'var(--warn)')
     + section('sw', '🎡', 'S/W 하위 30%', g.swLow, 'var(--danger)')
-    + section('surveyMissing', '📋', '이번 달 서베이 미제출자', g.surveyMissing, 'var(--danger)')
+    + section('surveyMissing', '📋', '서베이 미제출자', g.surveyMissing, 'var(--danger)')
     + section('birthday', '🎂', '이번 주 생일자', g.birthdayThisWeek, 'var(--good)')
     + section('contactOverdue', '⏰', '컨택주기('+cycle+'일) 초과자', g.contactOverdue, 'var(--danger)');
 }
@@ -1996,7 +1999,7 @@ function _orgSortVal(row, key){
   if(key==='risk') return row.trend.declined ? -1 : (row.trend.improved ? 1 : 0);
   if(key==='sw') return row.sw===undefined||row.sw===null||row.sw==='' ? -1 : Number(row.sw);
   if(key==='lastNote') return row.lastNote==='-' ? '' : row.lastNote;
-  if(key==='surveyThisMonth') return row.surveyThisMonth ? 1 : 0;
+  if(key==='surveySubmitted') return row.surveySubmitted ? 1 : 0;
   return row[key]||'';
 }
 function ocTermBadgesHtml(st){
@@ -2414,16 +2417,14 @@ function getOrgRows(){
     }
     return true;
   });
-  var thisMonthPrefix = new Date().getFullYear()+'-'+pad2(new Date().getMonth()+1);
   var rows = ids.map(function(id){
     var p = people[id];
     var t = swTrend(id);
     var cStats = allContactStats(id);
-    var resp = surveyResponses[id];
-    var surveyThisMonth = !!(resp && Object.values(resp).some(function(r){ return r.submittedAt && r.submittedAt.slice(0,7)===thisMonthPrefix; }));
+    var surveySubmitted = !!(surveyResponses[id] && Object.keys(surveyResponses[id]).length>0);
     return { id:id, name:p.name||'', hq:p.hq||'', branch:p.branch||'', seg:p.seg||'', cr:p.cr||'', efsr:p.efsr||'',
       sw:p.sw, lastNote: cStats.latest||'-', contactCount: cStats.count, trend:t, fav:!!p.fav, tags:p.tags||[],
-      surveyThisMonth: surveyThisMonth,
+      surveySubmitted: surveySubmitted,
       terminated:!!p.terminated, terminationCandidate:!!(p.terminationCandidate && !p.terminated) };
   });
   function rowPriority(r){ return r.terminated ? 2 : (r.terminationCandidate ? 1 : 0); } // 활성(0) → 소통불가(1) → 해촉(2) 순으로 항상 하단 고정
@@ -2462,7 +2463,7 @@ function renderOrgList(){
       +'<td>'+(r.efsr||'-')+'</td>'
       +'<td>'+(r.sw!==undefined&&r.sw!==null&&r.sw!==''?r.sw:'-')+'</td>'
       +'<td style="color:var(--muted);">'+r.lastNote+(r.contactCount?' <span style="color:var(--accent);font-weight:600;">(총 '+r.contactCount+'회)</span>':'')+'</td>'
-      +'<td>'+(r.surveyThisMonth
+      +'<td>'+(r.surveySubmitted
           ? '<span class="badge" style="background:#e6f6ee;color:var(--good);font-size:10.5px;padding:2px 6px;">✅ 제출</span>'
           : '<span class="badge" style="background:#fdeaee;color:var(--danger);font-size:10.5px;padding:2px 6px;">❌ 미제출</span>')+'</td>'
       +'<td>'+trendBadgeHtml(r.id)+'</td>'
@@ -2476,7 +2477,7 @@ function exportOrgListExcel(){
   rows.forEach(function(r){
     var t=r.trend;
     aoa.push([r.name, r.hq, r.branch, r.seg, r.cr, r.efsr, (r.sw!==undefined&&r.sw!==null&&r.sw!==''?r.sw:''), r.lastNote, r.contactCount||0,
-      (r.surveyThisMonth?'제출':'미제출'),
+      (r.surveySubmitted?'제출':'미제출'),
       (t.deltaLastMonth!==null?(t.deltaLastMonth>0?'+':'')+t.deltaLastMonth:'-'),
       (t.deltaVsH1!==null?(t.deltaVsH1>0?'+':'')+t.deltaVsH1:'-')]);
   });
@@ -2895,6 +2896,11 @@ async function sendGroupSurveyLinksViaSolapi(){
   var tagEl = document.getElementById('gsms-campaign-tag');
   var campaignTag = tagEl ? tagEl.value.trim() : '';
   if(!ids.length){ showToast('대상자 중 서베이를 보낼 수 있는 FSR이 없어요.'); return; }
+  var alreadyIds = ids.filter(function(id){ return surveyResponses[id] && Object.keys(surveyResponses[id]).length>0 && !surveyReopened[id]; });
+  if(alreadyIds.length){
+    var names = alreadyIds.map(function(id){ return people[id].name; }).join(', ');
+    if(!confirm('선택한 '+ids.length+'명 중 '+alreadyIds.length+'명은 이미 서베이 접수가 완료된 상태예요:\n'+names+'\n\n이 분들은 프로필에서 개별로 "재참여 허용"을 누르지 않으면 링크를 열어도 재제출이 안 돼요. 그래도 전체 발송하시겠어요?')) return;
+  }
   var basePath = location.pathname.replace(/[^/]*$/, '');
   var items = ids.map(function(id){
     var p = people[id];
@@ -3040,6 +3046,10 @@ function buildSurveyPanelHtml(empId){
   }
   var previewNote = ids.length ? '' : '<p style="font-size:11px;color:var(--muted);margin-bottom:12px;">아직 제출 전이에요 — 현재 서베이 항목 미리보기</p>';
   var copyBtn = ids.length ? '<button class="btn" style="font-size:11px;padding:5px 10px;" onclick="copyShareableSurveyReport(\''+empId+'\')">📋 공유용 보고서 복사</button>' : '';
+  var isReopened = !!surveyReopened[empId];
+  var reopenBtn = !ids.length ? '' : (isReopened
+    ? '<span style="font-size:11px;color:var(--accent);padding:5px 4px;">🔓 재참여 대기중</span>'
+    : '<button class="btn" style="font-size:11px;padding:5px 10px;color:var(--danger);border-color:var(--danger);" onclick="reopenSurveyFor(\''+empId+'\')">🔓 재참여 허용</button>');
   var scaleChartBlock = hasScaleHistory(empId)
     ? '<div style="border-top:1px solid var(--bd);margin-top:16px;padding-top:14px;">'
         +'<div class="card-title" style="margin-bottom:2px;">📈 심리척도 추이 (월별, 5점 만점)</div>'
@@ -3052,6 +3062,7 @@ function buildSurveyPanelHtml(empId){
       +'<div class="card-title" style="margin:0;">📋 서베이 응답</div>'
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;">'
         + copyBtn
+        + reopenBtn
         +'<button class="btn" style="font-size:11px;padding:5px 10px;" onclick="sendSurveyLink(\''+empId+'\')">🔗 링크 문자보내기</button>'
       +'</div>'
     +'</div>'
@@ -3366,9 +3377,30 @@ function saveQuickSchedule(empId){
   renderDashboard();
   showToast(entry.endDate ? (date+' ~ '+entry.endDate+' 일정이 추가됐어요.') : '일정이 캘린더('+date+')에 추가됐어요.');
 }
+// 이미 제출 완료된 사람에게 '한 번 더 제출 가능' 상태를 열어줌 (예전 응답은 삭제 안 하고 그대로 보존)
+// 링크를 못 받았거나, 내용을 다시 쓰고 싶다는 요청이 있을 때 사용. 제출 완료되면 플래그는 자동으로 다시 잠김.
+function reopenSurveyFor(empId){
+  var p = people[empId];
+  if(!p) return;
+  if(!confirm(p.name+'님이 같은 링크로 서베이에 한 번 더 참여할 수 있게 열어드릴까요?\n(기존 응답 기록은 그대로 남고, 새로 제출하면 다시 잠겨요)')) return;
+  fetch(FB_URL+ROOT+'/surveyReopened/'+empId+'.json', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(true)})
+    .then(function(r){
+      if(!r.ok) throw new Error('실패');
+      surveyReopened[empId] = true;
+      showToast(p.name+'님 재참여 허용 완료');
+      var overlay = document.querySelector('.modal-overlay'); if(overlay) overlay.remove();
+      openProfile(empId);
+    })
+    .catch(function(){ showToast('재참여 허용 처리 실패'); });
+}
 function sendSurveyLink(empId){
   var p = people[empId];
   if(!p || !p.phone){ showToast('전화번호가 없어요.'); return; }
+  if(surveyResponses[empId] && Object.keys(surveyResponses[empId]).length>0 && !surveyReopened[empId]){
+    var lastResp = Object.values(surveyResponses[empId]).sort(function(a,b){ return (a.submittedAt||'').localeCompare(b.submittedAt||''); }).pop();
+    var lastDate = lastResp && lastResp.submittedAt ? lastResp.submittedAt.slice(0,10) : '';
+    if(!confirm(p.name+'님은 이미 서베이 접수가 완료된 건이에요'+(lastDate?' (최근 제출: '+lastDate+')':'')+'.\n"재참여 허용"을 먼저 누르지 않으면 이 링크로는 재제출이 안 돼요.\n\n그래도 그냥 링크만 다시 보내시겠어요?')) return;
+  }
   var basePath = location.pathname.replace(/[^/]*$/, '');
   var url = location.origin + basePath + 'survey.html?id=' + empId;
   var text = fillTemplate(appConfig.messageTemplates.surveyLink, {name:p.name, url:url});
