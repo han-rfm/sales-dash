@@ -562,6 +562,10 @@ tr.row-clickable:hover{background:var(--sf2);}
 <script>
 /* ============ CONFIG — 정훈님이 채워주셔야 하는 부분 ============ */
 var FB_URL = 'https://cleaning-498705-default-rtdb.asia-southeast1.firebasedatabase.app';
+// ⚠ 서베이 링크는 location.origin/pathname으로 자동계산하지 않고 고정 배포주소를 씀.
+// (sales.html을 로컬 다운로드 파일로 열어서 발송 버튼을 누르면 location이 file:///... 이 되어
+//  링크가 깨지는 사고가 있었음 — 2026-08 확인. 항상 실제 배포 주소로 나가도록 고정.)
+var SURVEY_BASE_URL = 'https://han-rfm.github.io/sales-dash/';
 var APP_PASSWORD = '777'; // 여기 원하는 비밀번호로 바꿔주세요. 페이지 소스보기하면 그대로 보이니, 남한테 공유 안 하는 링크에서만 쓰는 걸 권장드려요.
 var SOLAPI_API_KEY = 'NCS8HYGUCLJBXZU0';
 var SOLAPI_API_SECRET = 'SPTCPSWBN4DTCBKTVYBVI8URHNCOVEGC'; // ⚠ 브라우저 소스에 그대로 노출됩니다 (정훈님 동의하에 반영)
@@ -1024,6 +1028,13 @@ function latestNoteDate(empId){
 }
 // 메모(활동기록) + 전화·문자·카카오 등 모든 Reach(contacts)를 합산한 최근 컨택일·누적횟수
 // ⚠ 기존엔 메모(notes)만 반영하고 있어서 실제 전화·문자 Reach가 "최근 컨택"에 안 잡히고 있었음 (2026-08 확인 후 수정)
+// 서베이 링크를 이 사람에게 보낸 적이 있는지(가장 최근 발송일) 조회. sendSurveyLink/sendSurveyMissingReminders/sendGroupSurveyLinksViaSolapi에서 'survey_link' 타입으로 로그됨.
+function lastSurveyLinkSentDate(empId){
+  var c = contacts[empId];
+  if(!c) return null;
+  var dates = Object.values(c).filter(function(x){ return x.type==='survey_link' && x.date; }).map(function(x){ return String(x.date).slice(0,10); }).sort();
+  return dates.length ? dates[dates.length-1] : null;
+}
 function allContactStats(empId){
   var dates = [];
   var n = notes[empId];
@@ -1300,14 +1311,13 @@ function startRoutineGroupSms(key){
 function sendSurveyMissingReminders(ids){
   var validIds = ids.filter(function(id){ return people[id] && people[id].phone; });
   if(!validIds.length){ showToast('전화번호가 있는 미제출자가 없어요.'); return; }
-  var basePath = location.pathname.replace(/[^/]*$/, '');
   var items = validIds.map(function(id){
     var p = people[id];
-    var url = location.origin + basePath + 'survey.html?id=' + id;
+    var url = SURVEY_BASE_URL + 'survey.html?id=' + id;
     var text = fillTemplate(appConfig.messageTemplates.surveyLink, {name:p.name, url:url});
     return { id:id, name:p.name||'?', phone:p.phone, text:text };
   });
-  openSendReviewModal(items, suggestCampaignTag('서베이미제출독려'));
+  openSendReviewModal(items, suggestCampaignTag('서베이미제출독려'), 'survey_link');
 }
 /* ---------- 이달의 추천 액션 (서베이 척도 기반) ---------- */
 function latestScaleScoresFor(empId){
@@ -1999,7 +2009,7 @@ function _orgSortVal(row, key){
   if(key==='risk') return row.trend.declined ? -1 : (row.trend.improved ? 1 : 0);
   if(key==='sw') return row.sw===undefined||row.sw===null||row.sw==='' ? -1 : Number(row.sw);
   if(key==='lastNote') return row.lastNote==='-' ? '' : row.lastNote;
-  if(key==='surveySubmitted') return row.surveySubmitted ? 1 : 0;
+  if(key==='surveySubmitted') return row.surveyStatus==='submitted' ? 2 : (row.surveyStatus==='sent' ? 1 : 0);
   return row[key]||'';
 }
 function ocTermBadgesHtml(st){
@@ -2422,9 +2432,11 @@ function getOrgRows(){
     var t = swTrend(id);
     var cStats = allContactStats(id);
     var surveySubmitted = !!(surveyResponses[id] && Object.keys(surveyResponses[id]).length>0);
+    var surveySentDate = lastSurveyLinkSentDate(id);
+    var surveyStatus = surveySubmitted ? 'submitted' : (surveySentDate ? 'sent' : 'none');
     return { id:id, name:p.name||'', hq:p.hq||'', branch:p.branch||'', seg:p.seg||'', cr:p.cr||'', efsr:p.efsr||'',
       sw:p.sw, lastNote: cStats.latest||'-', contactCount: cStats.count, trend:t, fav:!!p.fav, tags:p.tags||[],
-      surveySubmitted: surveySubmitted,
+      surveySubmitted: surveySubmitted, surveyStatus: surveyStatus, surveySentDate: surveySentDate,
       terminated:!!p.terminated, terminationCandidate:!!(p.terminationCandidate && !p.terminated) };
   });
   function rowPriority(r){ return r.terminated ? 2 : (r.terminationCandidate ? 1 : 0); } // 활성(0) → 소통불가(1) → 해촉(2) 순으로 항상 하단 고정
@@ -2463,9 +2475,11 @@ function renderOrgList(){
       +'<td>'+(r.efsr||'-')+'</td>'
       +'<td>'+(r.sw!==undefined&&r.sw!==null&&r.sw!==''?r.sw:'-')+'</td>'
       +'<td style="color:var(--muted);">'+r.lastNote+(r.contactCount?' <span style="color:var(--accent);font-weight:600;">(총 '+r.contactCount+'회)</span>':'')+'</td>'
-      +'<td>'+(r.surveySubmitted
+      +'<td>'+(r.surveyStatus==='submitted'
           ? '<span class="badge" style="background:#e6f6ee;color:var(--good);font-size:10.5px;padding:2px 6px;">✅ 제출</span>'
-          : '<span class="badge" style="background:#fdeaee;color:var(--danger);font-size:10.5px;padding:2px 6px;">❌ 미제출</span>')+'</td>'
+          : r.surveyStatus==='sent'
+          ? '<span class="badge" style="background:#fff6e5;color:#8a5a00;font-size:10.5px;padding:2px 6px;" title="발송일: '+(r.surveySentDate||'')+'">📨 발송함·미제출</span>'
+          : '<span class="badge" style="background:var(--sf2);color:var(--muted);font-size:10.5px;padding:2px 6px;">⬜ 미발송</span>')+'</td>'
       +'<td>'+trendBadgeHtml(r.id)+'</td>'
       +'</tr>';
   }).join('');
@@ -2477,7 +2491,7 @@ function exportOrgListExcel(){
   rows.forEach(function(r){
     var t=r.trend;
     aoa.push([r.name, r.hq, r.branch, r.seg, r.cr, r.efsr, (r.sw!==undefined&&r.sw!==null&&r.sw!==''?r.sw:''), r.lastNote, r.contactCount||0,
-      (r.surveySubmitted?'제출':'미제출'),
+      (r.surveyStatus==='submitted'?'제출':r.surveyStatus==='sent'?'발송함(미제출)':'미발송'),
       (t.deltaLastMonth!==null?(t.deltaLastMonth>0?'+':'')+t.deltaLastMonth:'-'),
       (t.deltaVsH1!==null?(t.deltaVsH1>0?'+':'')+t.deltaVsH1:'-')]);
   });
@@ -2802,7 +2816,8 @@ async function sendSolapiMessages(messages){
   return { ok: res.ok, data: data, failedNumbers: failedNumbers, count: count };
 }
 /* ---------- 카드형 발송 진행 모달 (청소앱과 동일한 UX) ---------- */
-function openSendReviewModal(items, campaignTag){
+function openSendReviewModal(items, campaignTag, type){
+  type = type || 'sms';
   // items: [{id, name, phone, text}]
   var overlay=document.createElement('div');
   overlay.className='modal-overlay';
@@ -2851,7 +2866,7 @@ function openSendReviewModal(items, campaignTag){
             if(cardEl){ cardEl.style.background='#fdeaee'; cardEl.style.borderColor='#f2b8c6'; cardEl.style.color='var(--danger)'; cardEl.textContent='❌ 실패'; }
           } else {
             successCount++;
-            if(idPhoneMap[m.to]) logContact(idPhoneMap[m.to], 'sms', campaignTag, nameByPhone[m.to]);
+            if(idPhoneMap[m.to]) logContact(idPhoneMap[m.to], type, campaignTag, nameByPhone[m.to]);
             if(cardEl){ cardEl.style.background='#e5f7ee'; cardEl.style.borderColor='#a8e0c2'; cardEl.style.color='var(--good)'; cardEl.textContent='✅ 전송완료'; }
           }
         });
@@ -2868,12 +2883,12 @@ function openSendReviewModal(items, campaignTag){
     }
   };
 }
-async function sendSingleSms(empId, phone, text){
+async function sendSingleSms(empId, phone, text, type){
   if(!phone){ showToast('전화번호가 없어요.'); return; }
   var name = '';
   if(empId && people[empId]) name = people[empId].name;
   else if(empId && hqStaff[empId]) name = hqStaff[empId].name;
-  openSendReviewModal([{ id: empId||('tmp'+Date.now()), name: name||'수신자', phone: phone, text: text }]);
+  openSendReviewModal([{ id: empId||('tmp'+Date.now()), name: name||'수신자', phone: phone, text: text }], null, type);
 }
 async function sendGroupSmsViaSolapi(){
   var ids = getGsmsTargetIds();
@@ -2901,16 +2916,15 @@ async function sendGroupSurveyLinksViaSolapi(){
     var names = alreadyIds.map(function(id){ return people[id].name; }).join(', ');
     if(!confirm('선택한 '+ids.length+'명 중 '+alreadyIds.length+'명은 이미 서베이 접수가 완료된 상태예요:\n'+names+'\n\n이 분들은 프로필에서 개별로 "재참여 허용"을 누르지 않으면 링크를 열어도 재제출이 안 돼요. 그래도 전체 발송하시겠어요?')) return;
   }
-  var basePath = location.pathname.replace(/[^/]*$/, '');
   var items = ids.map(function(id){
     var p = people[id];
-    var url = location.origin + basePath + 'survey.html?id=' + id;
+    var url = SURVEY_BASE_URL + 'survey.html?id=' + id;
     var text = fillTemplate(appConfig.messageTemplates.surveyLink, {name:p.name, url:url});
     return { id:id, name:p.name||'?', phone:p.phone||'', text:text };
   }).filter(function(it){ return it.phone; });
   if(!items.length){ showToast('전화번호가 있는 대상자가 없어요.'); return; }
   document.querySelector('.modal-overlay').remove();
-  openSendReviewModal(items, campaignTag);
+  openSendReviewModal(items, campaignTag, 'survey_link');
 }
 
 /* ---------- PROFILE ---------- */
@@ -3401,15 +3415,13 @@ function sendSurveyLink(empId){
     var lastDate = lastResp && lastResp.submittedAt ? lastResp.submittedAt.slice(0,10) : '';
     if(!confirm(p.name+'님은 이미 서베이 접수가 완료된 건이에요'+(lastDate?' (최근 제출: '+lastDate+')':'')+'.\n"재참여 허용"을 먼저 누르지 않으면 이 링크로는 재제출이 안 돼요.\n\n그래도 그냥 링크만 다시 보내시겠어요?')) return;
   }
-  var basePath = location.pathname.replace(/[^/]*$/, '');
-  var url = location.origin + basePath + 'survey.html?id=' + empId;
+  var url = SURVEY_BASE_URL + 'survey.html?id=' + empId;
   var text = fillTemplate(appConfig.messageTemplates.surveyLink, {name:p.name, url:url});
-  sendSingleSms(empId, p.phone, text);
+  sendSingleSms(empId, p.phone, text, 'survey_link');
 }
 // 실제 담당자 데이터를 건드리지 않는 테스트 전용 링크(id=test)를 정훈님 번호로 발송
 function sendTestSurveyToMe(){
-  var basePath = location.pathname.replace(/[^/]*$/, '');
-  var url = location.origin + basePath + 'survey.html?id=test';
+  var url = SURVEY_BASE_URL + 'survey.html?id=test';
   var text = fillTemplate(appConfig.messageTemplates.surveyLink, {name:'테스트', url:url})
     + '\n\n(🧪 테스트 링크예요 — 제출해도 실제 명단에는 반영되지 않아요)';
   openSendReviewModal([{ id:'testself'+Date.now(), name:'나(테스트)', phone:'01092925782', text:text }]);
