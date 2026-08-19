@@ -1879,6 +1879,61 @@ function renderEngageEffectChart(allIds, contactedIds){
   });
 }
 
+// "상품 이해도" 관련 문항들을 하나로 합쳐서 보여줌 (요청: 두 결과값 합치고 통일된 질문명으로 대시보드+프로필 양쪽에 표시)
+// ⚠ 정확한 라벨 문자열로 매칭하면 문항을 살짝만 수정해도 매칭이 깨지므로,
+// "Onboarding 섹션 + 라벨에 '이해도' 포함 + 척도형(scale)" 조건으로 유연하게 잡음.
+// "상품 이해도" 문항 통합: 정훈님이 지정한 두 문항(예전 문구 / 최신 문구)만 정확히 합침.
+// 임의 필터링(키워드 포함 등) 안 쓰고, 딱 이 두 문항만 지정. 표시 이름은 최신(2번째) 문항 문구 그대로 사용.
+// 공백 차이로 매칭이 깨지는 걸 막기 위해 공백만 제거하고 비교(normalize).
+function normalizeQ(s){ return String(s).replace(/\s+/g,''); }
+var PRODUCT_UNDERSTANDING_LABEL_OLD = '주력 보험상품에 대한 이해도는 얼마나 되시나요?';
+var PRODUCT_UNDERSTANDING_LABEL_NEW = '변액, 보장성, 달러 등 주요 상품에 대한 이해도는 얼마나 되시나요?'; // 이 문구가 최종 표시 이름으로 쓰임
+var PRODUCT_UNDERSTANDING_LABELS_NORM = [normalizeQ(PRODUCT_UNDERSTANDING_LABEL_OLD), normalizeQ(PRODUCT_UNDERSTANDING_LABEL_NEW)];
+function isMergedProductUnderstandingField(secTitle, label){
+  return PRODUCT_UNDERSTANDING_LABELS_NORM.indexOf(normalizeQ(label))>=0;
+}
+function computeMergedProductUnderstanding(){
+  var counts = {}; var total = 0; var scoreSum = 0; var scoreCount = 0;
+  Object.keys(people).forEach(function(id){
+    var r = getLatestSurveyResponseFor(id);
+    if(!r || !r.sections) return;
+    r.sections.forEach(function(sec){
+      (sec.items||[]).forEach(function(it){
+        if(!it.value) return;
+        if(!isMergedProductUnderstandingField(sec.title, it.label)) return;
+        var tField = findTemplateFieldByLabel(sec.title, it.label);
+        counts[it.value] = (counts[it.value]||0)+1;
+        total++;
+        var s = scaleScoreOf(it.value, tField ? !!tField.reverseScored : false);
+        if(s!==null){ scoreSum += s; scoreCount++; }
+      });
+    });
+  });
+  return { counts:counts, total:total, avg: scoreCount ? (scoreSum/scoreCount) : null };
+}
+function renderMergedProductUnderstandingHtml(){
+  var d = computeMergedProductUnderstanding();
+  if(!d.total) return '';
+  var entries = SCALE_OPTIONS.map(function(opt){ return [opt, d.counts[opt]||0]; });
+  var maxCount = Math.max.apply(null, entries.map(function(e){return e[1];}));
+  var barsHtml = entries.map(function(e){
+    var val=e[0], cnt=e[1];
+    var pct = d.total ? Math.round(cnt/d.total*100) : 0;
+    var barPct = maxCount ? Math.round(cnt/maxCount*100) : 0;
+    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
+      +'<div style="width:100px;flex-shrink:0;font-size:11px;color:var(--text);text-align:right;">'+val+'</div>'
+      +'<div style="flex:1;background:var(--sf2);border-radius:6px;height:14px;overflow:hidden;">'
+        +'<div style="width:'+barPct+'%;background:var(--accent);height:100%;border-radius:6px;"></div>'
+      +'</div>'
+      +'<div style="width:62px;flex-shrink:0;font-size:10.5px;color:var(--muted);">'+cnt+'건 ('+pct+'%)</div>'
+    +'</div>';
+  }).join('');
+  return '<div style="border-top:1px solid var(--bd);padding-top:12px;">'
+    +'<div style="font-size:12px;font-weight:700;margin-bottom:8px;">'+PRODUCT_UNDERSTANDING_LABEL_NEW
+      +'<span style="font-weight:400;color:var(--muted);font-size:10.5px;"> (예전 문구로 받은 응답 포함 · 총 '+d.total+'건'+(d.avg!==null?' · 평균 '+d.avg.toFixed(2)+'점':'')+')</span></div>'
+    +barsHtml
+  +'</div>';
+}
 var HQ_METRIC_LABELS = { avgCount:'건수', avgMip:'MIP', avgSp:'SP', perMip:'건당MIP', perSp:'건당SP' };
 function renderSurveyRate(ids){
   var respondedIds = ids.filter(function(id){ return surveyResponses[id] && Object.keys(surveyResponses[id]).length>0; });
@@ -3086,6 +3141,11 @@ function buildSurveyPanelHtml(empId){
       +'</div>'
     : '';
   var swSummaryBlock = buildSwAlignmentSummary(empId);
+  var mpuHtml = renderMergedProductUnderstandingHtml();
+  var mpuBlock = mpuHtml ? '<div style="border-top:1px solid var(--bd);margin-top:16px;padding-top:14px;">'
+      +'<p style="font-size:10px;color:var(--muted);margin-bottom:8px;">아래는 이 사람 개인 응답이 아니라, 관련 문항 전체 조직 응답을 합친 참고용 분포예요.</p>'
+      + mpuHtml
+    +'</div>' : '';
   return '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px;">'
       +'<div class="card-title" style="margin:0;">📋 서베이 응답</div>'
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;">'
@@ -3098,6 +3158,7 @@ function buildSurveyPanelHtml(empId){
     + previewNote
     + '<div id="survey-resp-view-'+empId+'">'+(ids.length? buildSurveyResponseHtml(resp[ids[0]]) : buildSurveyTemplatePreviewHtml())+'</div>'
     + scaleChartBlock
+    + mpuBlock
     + swSummaryBlock
     + '<div style="border-top:1px solid var(--bd);margin-top:16px;padding-top:14px;">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'
@@ -3232,6 +3293,29 @@ function surveyStatFilterHqChanged(skipRender){
   branchSel.innerHTML = '<option value="">전체 지점</option>' + branches.map(function(b){return '<option>'+b+'</option>';}).join('');
   renderSurveyStatDistribution();
 }
+// ⚠ 문항 병합 그룹: 정훈님이 서베이 문항 순서/문구를 바꾸면 예전 응답이 별도 문항으로 분리되는 문제를 막기 위함.
+// 각 그룹 = { label: 화면에 표시할 문항명(항상 배열의 마지막=가장 최근 설정한 문구), aliases: [예전문구, ..., 최신문구] }
+// 새로 문항을 또 수정하면, 여기에 그룹을 새로 추가하거나 기존 그룹의 aliases에 새 문구를 추가하면 됨.
+var SURVEY_MERGE_GROUPS = [
+  { aliases: [
+      '주력 보험상품에 대한 이해도는 얼마나 되시나요?',
+      '변액, 보장성, 달러 등 주요 상품에 대한 이해도는 얼마나 되시나요?'
+    ] },
+  { aliases: [
+      'eFSR로 성공할 수 있도록 본사,지점에 바라는 점 (특화 제도, 기획)',
+      'eFSR로 성공할 수 있도록 본사,지점에 바라는 점 (특화 제도, 기획, 행사)'
+    ] }
+];
+function resolveMergedQuestionLabel(label){
+  var n = normalizeQ(label);
+  for(var i=0;i<SURVEY_MERGE_GROUPS.length;i++){
+    var g = SURVEY_MERGE_GROUPS[i];
+    if(g.aliases.some(function(a){ return normalizeQ(a)===n; })){
+      return g.aliases[g.aliases.length-1]; // 항상 그룹의 마지막(최신) 문구로 표시
+    }
+  }
+  return label;
+}
 function renderSurveyStatDistribution(){
   var summaryEl = document.getElementById('survey-stat-summary');
   var bodyEl = document.getElementById('survey-stat-body');
@@ -3266,8 +3350,9 @@ function renderSurveyStatDistribution(){
       if(!sec.items) return;
       sec.items.forEach(function(it){
         if(!it.label) return;
-        var key = sec.title+'||'+it.label;
-        if(!qMap[key]) qMap[key] = { secTitle: sec.title, label: it.label, order: order++, raw: [] };
+        var resolvedLabel = resolveMergedQuestionLabel(it.label);
+        var key = sec.title+'||'+resolvedLabel;
+        if(!qMap[key]) qMap[key] = { secTitle: sec.title, label: resolvedLabel, order: order++, raw: [] };
         if(it.value===undefined || it.value===null || it.value==='') return;
         qMap[key].raw.push({ value: it.value, who: who||'소속 미상', name: p.name||'이름 미상' });
       });
