@@ -3141,11 +3141,6 @@ function buildSurveyPanelHtml(empId){
       +'</div>'
     : '';
   var swSummaryBlock = buildSwAlignmentSummary(empId);
-  var mpuHtml = renderMergedProductUnderstandingHtml();
-  var mpuBlock = mpuHtml ? '<div style="border-top:1px solid var(--bd);margin-top:16px;padding-top:14px;">'
-      +'<p style="font-size:10px;color:var(--muted);margin-bottom:8px;">아래는 이 사람 개인 응답이 아니라, 관련 문항 전체 조직 응답을 합친 참고용 분포예요.</p>'
-      + mpuHtml
-    +'</div>' : '';
   return '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px;">'
       +'<div class="card-title" style="margin:0;">📋 서베이 응답</div>'
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;">'
@@ -3158,7 +3153,6 @@ function buildSurveyPanelHtml(empId){
     + previewNote
     + '<div id="survey-resp-view-'+empId+'">'+(ids.length? buildSurveyResponseHtml(resp[ids[0]]) : buildSurveyTemplatePreviewHtml())+'</div>'
     + scaleChartBlock
-    + mpuBlock
     + swSummaryBlock
     + '<div style="border-top:1px solid var(--bd);margin-top:16px;padding-top:14px;">'
       + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'
@@ -3517,7 +3511,7 @@ function buildSurveyResponseHtml(r){
               var matchField = t.fields.find(function(tf){ return tf.label===it.label; });
               if(matchField && matchField.swItem) swTag = swChipHtml(matchField.swItem);
             }
-            return '<div style="margin-bottom:8px;"><div style="font-size:11px;color:var(--muted);">'+it.label+swTag+'</div><div style="font-size:13px;white-space:pre-wrap;">'+(it.value ? it.value : '<span style="color:var(--dim);">미응답</span>')+'</div></div>';
+            return '<div style="margin-bottom:8px;"><div style="font-size:11px;color:var(--muted);">'+resolveMergedQuestionLabel(it.label)+swTag+'</div><div style="font-size:13px;white-space:pre-wrap;">'+(it.value ? it.value : '<span style="color:var(--dim);">미응답</span>')+'</div></div>';
           }).join('')
       +'</div>';
     }).join('');
@@ -3541,7 +3535,7 @@ function copyShareableSurveyReport(empId){
     if(vis==='private') return; // 비공개 섹션은 절대 포함하지 않음
     lines.push('■ '+sec.title);
     sec.items.forEach(function(it){
-      lines.push('- '+it.label+': '+(it.value||'(미응답)'));
+      lines.push('- '+resolveMergedQuestionLabel(it.label)+': '+(it.value||'(미응답)'));
     });
     lines.push('');
   });
