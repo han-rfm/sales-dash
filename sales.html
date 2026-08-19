@@ -385,6 +385,7 @@ tr.row-clickable:hover{background:var(--sf2);}
     <!-- MAP -->
     <div class="view" id="view-map">
       <div class="filter-row">
+        <button class="btn" onclick="importOfficeAddrFromSurvey()">📥 서베이에서 주소 가져오기</button>
         <button class="btn" onclick="geocodeAllPeople()">📍 좌표 일괄 갱신</button>
         <span id="map-geo-status" style="font-size:12px;color:var(--muted);align-self:center;"></span>
       </div>
@@ -5284,6 +5285,57 @@ function renderMap(){
       bounds.extend(pos);
     });
     _mapInstance.setBounds(bounds);
+  });
+}
+// 서베이 문항 'officeAddr'의 현재 라벨을 찾아, 그 라벨로 응답된 텍스트를 찾음 (문항 라벨이 바뀌면 옛 응답과 매칭이 안 될 수 있음)
+function getSurveyOfficeAddrLabel(){
+  if(!surveyTemplate || !surveyTemplate.sections) return null;
+  for(var i=0;i<surveyTemplate.sections.length;i++){
+    var f = (surveyTemplate.sections[i].fields||[]).find(function(f){ return f.id==='officeAddr'; });
+    if(f) return f.label;
+  }
+  return null;
+}
+function getSurveyOfficeAddrFor(empId){
+  var label = getSurveyOfficeAddrLabel();
+  if(!label) return null;
+  var r = getLatestSurveyResponseFor(empId);
+  if(!r || !r.sections) return null;
+  for(var i=0;i<r.sections.length;i++){
+    var it = (r.sections[i].items||[]).find(function(it){ return it.label===label; });
+    if(it && it.value && it.value.trim()) return it.value.trim();
+  }
+  return null;
+}
+// 서베이로 받은 오피스 주소를 프로필의 officeAddress로 가져옴. 이미 프로필에 주소가 입력돼 있는 사람은 덮어쓰지 않음(수기 입력 보호).
+function importOfficeAddrFromSurvey(){
+  var statusEl = document.getElementById('map-geo-status');
+  if(!getSurveyOfficeAddrLabel()){
+    if(statusEl) statusEl.textContent = '⚠ 서베이 템플릿에 오피스 주소 문항(officeAddr)이 없어요.';
+    return;
+  }
+  var patches = {};
+  var updated = 0, alreadyHad = 0, noAnswer = 0;
+  Object.keys(people).forEach(function(id){
+    var p = people[id];
+    if(p.officeAddress){ alreadyHad++; return; }
+    var addr = getSurveyOfficeAddrFor(id);
+    if(addr){ patches[id] = addr; updated++; }
+    else { noAnswer++; }
+  });
+  if(!updated){
+    if(statusEl) statusEl.textContent = '가져올 새 주소가 없어요 (이미 프로필에 입력됨 '+alreadyHad+'명 · 서베이에 주소 응답 없음 '+noAnswer+'명)';
+    return;
+  }
+  if(statusEl) statusEl.textContent = '주소 '+updated+'건 가져오는 중...';
+  var ids = Object.keys(patches);
+  Promise.all(ids.map(function(id){
+    people[id].officeAddress = patches[id];
+    return fetch(FB_URL+ROOT+'/people/'+id+'/officeAddress.json',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(patches[id])});
+  })).then(function(){
+    if(statusEl) statusEl.textContent = '✅ 서베이 응답에서 주소 '+updated+'건 가져왔어요. 이제 "좌표 일괄 갱신"을 눌러 지도에 반영해주세요.';
+  }).catch(function(){
+    if(statusEl) statusEl.textContent = '⚠ 가져오는 중 일부 실패했어요. 다시 시도해주세요.';
   });
 }
 function geocodeAllPeople(){
