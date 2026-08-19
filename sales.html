@@ -179,6 +179,15 @@ tr.row-clickable:hover{background:var(--sf2);}
         </div>
       </div>
 
+      <div class="card" style="margin-bottom:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+          <div class="card-title" style="margin:0;">📋 프로파일링 현황</div>
+          <button class="btn" style="font-size:11px;padding:5px 10px;" onclick="showSurveyPending()">미응답자 보기</button>
+        </div>
+        <div class="energy-bar-wrap"><div class="energy-bar-fill" id="survey-rate-fill" style="width:0%;background:linear-gradient(90deg,var(--accent),var(--good));height:100%;transition:width .3s;"></div></div>
+        <div style="font-size:12px;color:var(--muted);margin-top:8px;" id="survey-rate-label">-</div>
+      </div>
+
       <div class="grid-2">
         <div class="card" style="display:flex;flex-direction:column;">
           <div class="card-title">🔁 상시 체크 루틴 (Success Wheel Quick Win)</div>
@@ -232,15 +241,6 @@ tr.row-clickable:hover{background:var(--sf2);}
           <span>월평균 Reach <b id="reach-monthly-avg" style="color:var(--text);">-</b></span>
         </div>
         <p style="font-size:10.5px;color:var(--muted);margin-top:8px;">Engagement = 신규 프로파일링(서베이) 업데이트 +1 · Reach Point = 전화·문자·만남(컨택메모)·서베이응답 전부 합친 컨택포인트 누적건수.</p>
-      </div>
-
-      <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-          <div class="card-title" style="margin:0;">📋 프로파일링 현황</div>
-          <button class="btn" style="font-size:11px;padding:5px 10px;" onclick="showSurveyPending()">미응답자 보기</button>
-        </div>
-        <div class="energy-bar-wrap"><div class="energy-bar-fill" id="survey-rate-fill" style="width:0%;background:linear-gradient(90deg,var(--accent),var(--good));height:100%;transition:width .3s;"></div></div>
-        <div style="font-size:12px;color:var(--muted);margin-top:8px;" id="survey-rate-label">-</div>
       </div>
 
       <div class="card">
@@ -401,6 +401,19 @@ tr.row-clickable:hover{background:var(--sf2);}
 
     <!-- REPORT -->
     <div class="view" id="view-report">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;flex-wrap:wrap;gap:6px;">
+          <div class="card-title" style="margin:0;">📋 서베이 응답 분포</div>
+          <div style="display:flex;gap:8px;">
+            <select id="survey-stat-filter-hq" onchange="surveyStatFilterHqChanged()" style="width:auto;font-size:12px;padding:6px 10px;"></select>
+            <select id="survey-stat-filter-branch" onchange="renderSurveyStatDistribution()" style="width:auto;font-size:12px;padding:6px 10px;"></select>
+          </div>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:6px;">가장 최근에 제출한 응답 기준으로, 문항별 답변이 어떻게 분포됐는지 보여줘요.</p>
+        <div id="survey-stat-summary" style="font-size:12px;color:var(--text);font-weight:600;margin-bottom:14px;"></div>
+        <div id="survey-stat-body"></div>
+      </div>
+
       <div class="card">
         <div class="card-title">📄 실적 리포트</div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
@@ -965,7 +978,7 @@ function switchTab(name){
   document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active');});
   document.getElementById('view-'+name).classList.add('active');
   if(name==='map') renderMap();
-  if(name==='report') initReportPeriod();
+  if(name==='report'){ initReportPeriod(); renderSurveyStatFilters(); }
 }
 
 /* ---------- HELPERS ---------- */
@@ -3186,6 +3199,164 @@ function renderScaleTrendChart(empId){
 function findTemplateSectionByTitle(title){
   if(!surveyTemplate || !surveyTemplate.sections) return null;
   return surveyTemplate.sections.find(function(s){ return s.title===title; }) || null;
+}
+/* ---------- REPORT TAB: 서베이 응답 분포 ---------- */
+function getLatestSurveyResponseFor(empId){
+  var resp = surveyResponses[empId];
+  if(!resp) return null;
+  var ids = Object.keys(resp).sort(function(a,b){ return (resp[b].submittedAt||'').localeCompare(resp[a].submittedAt||''); });
+  return ids.length ? resp[ids[0]] : null;
+}
+function findTemplateFieldByLabel(secTitle, label){
+  var sec = findTemplateSectionByTitle(secTitle);
+  if(!sec || !sec.fields) return null;
+  return sec.fields.find(function(f){ return f.label===label; }) || null;
+}
+function renderSurveyStatFilters(){
+  var hqs = [...new Set(Object.values(people).map(function(p){return p.hq;}).filter(Boolean))].sort();
+  var sel = document.getElementById('survey-stat-filter-hq');
+  if(!sel) return;
+  sel.innerHTML = '<option value="">전체 본부</option>' + hqs.map(function(h){return '<option>'+h+'</option>';}).join('');
+  surveyStatFilterHqChanged(true);
+}
+function surveyStatFilterHqChanged(skipRender){
+  var hq = document.getElementById('survey-stat-filter-hq').value;
+  var branchSel = document.getElementById('survey-stat-filter-branch');
+  var branches;
+  if(hq){
+    branches = [...new Set(Object.keys(people).filter(function(id){return people[id].hq===hq;}).map(function(id){return people[id].branch;}).filter(Boolean))].sort();
+  } else {
+    branches = [...new Set(Object.values(people).map(function(p){return p.branch;}).filter(Boolean))].sort();
+  }
+  branchSel.innerHTML = '<option value="">전체 지점</option>' + branches.map(function(b){return '<option>'+b+'</option>';}).join('');
+  renderSurveyStatDistribution();
+}
+function renderSurveyStatDistribution(){
+  var summaryEl = document.getElementById('survey-stat-summary');
+  var bodyEl = document.getElementById('survey-stat-body');
+  if(!summaryEl || !bodyEl) return;
+  var hq = document.getElementById('survey-stat-filter-hq').value;
+  var branch = document.getElementById('survey-stat-filter-branch').value;
+  var targetIds = Object.keys(people).filter(function(id){
+    var p = people[id];
+    if(p.terminated) return false;
+    if(hq && p.hq!==hq) return false;
+    if(branch && p.branch!==branch) return false;
+    return true;
+  });
+  var respondedIds = targetIds.filter(function(id){ return surveyResponses[id] && Object.keys(surveyResponses[id]).length>0; });
+  if(!respondedIds.length){
+    summaryEl.textContent = '이 조건에 해당하는 응답이 아직 없어요.';
+    bodyEl.innerHTML = '';
+    return;
+  }
+  var rate = targetIds.length ? Math.round(respondedIds.length/targetIds.length*100) : 0;
+  summaryEl.textContent = '응답 '+respondedIds.length+'명 / 대상 '+targetIds.length+'명 ('+rate+'%) 기준';
+
+  // 1차: 문항별 원본 응답(값+응답자정보)만 모음 (타입 판정은 2차에서)
+  var qMap = {}; // key -> {secTitle, label, order, raw:[{value,hq,branch,name}]}
+  var order = 0;
+  respondedIds.forEach(function(id){
+    var r = getLatestSurveyResponseFor(id);
+    if(!r || !r.sections) return;
+    var p = people[id]||{};
+    var who = (p.hq||'') + (p.branch?(' '+p.branch):'');
+    r.sections.forEach(function(sec){
+      if(!sec.items) return;
+      sec.items.forEach(function(it){
+        if(!it.label) return;
+        var key = sec.title+'||'+it.label;
+        if(!qMap[key]) qMap[key] = { secTitle: sec.title, label: it.label, order: order++, raw: [] };
+        if(it.value===undefined || it.value===null || it.value==='') return;
+        qMap[key].raw.push({ value: it.value, who: who||'소속 미상', name: p.name||'이름 미상' });
+      });
+    });
+  });
+
+  // 리커트 척도 순서/점수 계산은 기존 전역 SCALE_OPTIONS·scaleScoreOf 재사용 (survey.html과 동일 기준)
+
+  // 2차: 템플릿에서 타입 조회, 없으면 응답 패턴으로 추정(텍스트인지 선택형인지)
+  var questions = Object.values(qMap).sort(function(a,b){ return a.order-b.order; }).map(function(q){
+    var tField = findTemplateFieldByLabel(q.secTitle, q.label);
+    var type = tField ? tField.type : null;
+    if(!type){
+      // 템플릿에서 못 찾은 문항(라벨 변경/삭제 등) → 응답 내용으로 서술형인지 추정
+      var vals = q.raw.map(function(r){ return String(r.value); });
+      var uniqueRatio = vals.length ? new Set(vals).size / vals.length : 0;
+      var avgLen = vals.length ? vals.reduce(function(s,v){return s+v.length;},0)/vals.length : 0;
+      var isLikert = vals.length>0 && vals.every(function(v){ return SCALE_OPTIONS.indexOf(v)>=0; });
+      type = isLikert ? 'scale' : (uniqueRatio>=0.6 || avgLen>18 ? 'text' : 'choice');
+    }
+    q.type = type;
+    q.totalAnswered = q.raw.length;
+    if(type==='text'){
+      q.textEntries = q.raw.map(function(r){ return {who:r.who, name:r.name, value:r.value}; });
+    } else if(type==='multichoice'){
+      q.counts = {}; q.totalSelections = 0;
+      q.raw.forEach(function(r){
+        String(r.value).split(',').map(function(s){return s.trim();}).filter(Boolean).forEach(function(v){
+          q.counts[v] = (q.counts[v]||0)+1; q.totalSelections++;
+        });
+      });
+    } else {
+      q.counts = {};
+      q.raw.forEach(function(r){ q.counts[r.value] = (q.counts[r.value]||0)+1; });
+      if(type==='scale'){
+        var reverseScored = tField ? !!tField.reverseScored : false;
+        var scores = q.raw.map(function(r){ return scaleScoreOf(r.value, reverseScored); }).filter(function(s){ return s!==null; });
+        q.avgScore = scores.length ? (scores.reduce(function(a,b){return a+b;},0)/scores.length) : null;
+      }
+    }
+    return q;
+  });
+
+  if(!questions.length){ bodyEl.innerHTML = '<div class="empty">문항 데이터가 없어요.</div>'; return; }
+  bodyEl.innerHTML = questions.map(function(q){
+    if(q.type==='text'){
+      var cardId = 'survey-stat-text-'+q.order;
+      var listHtml = q.textEntries.map(function(e){
+        var safeVal = String(e.value).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return '<div style="padding:8px 0;border-bottom:1px solid var(--bd);">'
+          +'<div style="font-size:10.5px;color:var(--muted);margin-bottom:2px;">'+e.who+' · '+e.name+'</div>'
+          +'<div style="font-size:12.5px;white-space:pre-wrap;">'+safeVal+'</div>'
+        +'</div>';
+      }).join('') || '<div class="empty" style="font-size:11px;">응답 내용이 없어요.</div>';
+      return '<div class="card" style="padding:12px 14px;margin-bottom:10px;cursor:pointer;" onclick="toggleCollapse(\''+cardId+'\')">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;">'
+          +'<div style="font-size:12.5px;font-weight:700;">✏️ '+q.label+' <span style="font-weight:400;color:var(--muted);font-size:11px;">('+q.secTitle+' · 서술형 · 응답 '+q.totalAnswered+'명)</span></div>'
+          +'<span class="arrow" id="'+cardId+'-arrow" style="color:var(--muted);font-size:13px;">▸</span>'
+        +'</div>'
+        +'<div id="'+cardId+'" style="display:none;margin-top:10px;" onclick="event.stopPropagation();">'+listHtml+'</div>'
+      +'</div>';
+    }
+    var avgHtml = (q.type==='scale' && q.avgScore!==null && q.avgScore!==undefined) ? ' · 평균 '+q.avgScore.toFixed(2)+'점' : '';
+    var headHtml = '<div style="font-size:12.5px;font-weight:700;margin-bottom:6px;">'+q.label
+      +' <span style="font-weight:400;color:var(--muted);font-size:11px;">('+q.secTitle+' · 응답 '+q.totalAnswered+'명'
+      +(q.type==='multichoice'?' · 총 선택 '+q.totalSelections+'건':'')+avgHtml+')</span></div>';
+    var denom = q.type==='multichoice' ? q.totalSelections : q.totalAnswered;
+    var entries = Object.entries(q.counts);
+    if(q.type==='scale'){
+      // 매우그렇다 > 그렇다 > 보통이다 > 그렇지않다 > 매우그렇지않다 순으로 고정 정렬 (리커트 척도는 순서 자체가 의미이므로 빈도순 정렬 안 함)
+      entries.sort(function(a,b){ return SCALE_OPTIONS.indexOf(a[0]) - SCALE_OPTIONS.indexOf(b[0]); });
+    } else {
+      entries.sort(function(a,b){ return b[1]-a[1]; });
+    }
+    var maxCount = entries.length ? Math.max.apply(null, entries.map(function(e){return e[1];})) : 0;
+    var barsHtml = entries.map(function(e){
+      var val = e[0], cnt = e[1];
+      var pct = denom ? Math.round(cnt/denom*100) : 0;
+      var barPct = maxCount ? Math.round(cnt/maxCount*100) : 0;
+      var safeVal = String(val).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">'
+        +'<div style="width:120px;flex-shrink:0;font-size:11.5px;color:var(--text);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="'+safeVal+'">'+safeVal+'</div>'
+        +'<div style="flex:1;background:var(--sf2);border-radius:6px;height:16px;position:relative;overflow:hidden;">'
+          +'<div style="width:'+barPct+'%;background:var(--accent);height:100%;border-radius:6px;"></div>'
+        +'</div>'
+        +'<div style="width:76px;flex-shrink:0;font-size:11px;color:var(--muted);">'+cnt+(q.type==='multichoice'?'건':'명')+' ('+pct+'%)</div>'
+      +'</div>';
+    }).join('');
+    return '<div style="margin-bottom:18px;">'+headHtml+barsHtml+'</div>';
+  }).join('');
 }
 function scaleAverageBadge(secTemplate, items){
   if(!secTemplate) return '';
