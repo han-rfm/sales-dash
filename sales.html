@@ -2895,6 +2895,13 @@ function getOrgRows(){
   });
   return rows;
 }
+// 조직도 리스트 이름 옆 개인용 체크박스 2개 (용도 표기 없음, 정훈님만 아는 용도)
+function toggleOrgChk(id, num, checked){
+  if(!people[id]) return;
+  var field = 'chk'+num;
+  people[id][field] = checked;
+  fetch(FB_URL+ROOT+'/people/'+id+'/'+field+'.json', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(checked)});
+}
 function renderOrgList(){
   document.querySelectorAll('#org-thead-row .arrow').forEach(function(el){ el.textContent=''; });
   var arrowEl = document.getElementById('arrow-'+_orgSortKey);
@@ -2911,6 +2918,10 @@ function renderOrgList(){
     var rowBg = r.terminated ? 'background:#fdeaee;' : (r.terminationCandidate ? 'background:#fff6e5;' : '');
     return '<tr class="row-clickable" style="'+rowBg+'" onclick="openProfile(\''+r.id+'\')">'
       +'<td>'+(r.fav?'<span style="color:var(--warn);">★</span> ':'')+r.name
+        +'<span style="margin-left:8px;" onclick="event.stopPropagation();">'
+          +'<input type="checkbox" '+(people[r.id]&&people[r.id].chk1?'checked':'')+' onclick="event.stopPropagation();" onchange="toggleOrgChk(\''+r.id+'\',1,this.checked)" style="width:auto;vertical-align:middle;">'
+          +'<input type="checkbox" '+(people[r.id]&&people[r.id].chk2?'checked':'')+' onclick="event.stopPropagation();" onchange="toggleOrgChk(\''+r.id+'\',2,this.checked)" style="width:auto;vertical-align:middle;margin-left:4px;">'
+        +'</span>'
         +(r.terminated?' <span class="badge" style="background:#fdeaee;color:var(--danger);font-size:9.5px;padding:1px 5px;">해촉</span>':'')
         +(r.terminationCandidate?' <span class="badge" style="background:#fff6e5;color:#8a5a00;font-size:9.5px;padding:1px 5px;">소통불가</span>':'')
       +'</td>'
@@ -2976,7 +2987,34 @@ function suggestOrgCampaignTag(orgHq, orgBranch){
 function suggestOrgCampaignTitle(orgHq, orgBranch, count){
   return orgHq + (orgBranch ? '/'+orgBranch : '') + ' ('+count+'명)';
 }
-/* ---------- MGR Reach: MD/AM/FM 전용 발송 ---------- */
+// 네이티브 <input type=time step=300>이 일부 브라우저/기기에서 5분단위를 무시하는 문제 우회 — 시/분을 직접 select로 구성
+function buildTimeSelectHtml(idPrefix){
+  var hOpts = '<option value="">--</option>' + Array.from({length:24},function(_,i){return pad2(i);}).map(function(h){return '<option value="'+h+'">'+h+'</option>';}).join('');
+  var mOpts = '<option value="">--</option>' + ['00','05','10','15','20','25','30','35','40','45','50','55'].map(function(m){return '<option value="'+m+'">'+m+'</option>';}).join('');
+  return '<div style="display:flex;gap:6px;align-items:center;">'
+    +'<select id="'+idPrefix+'-h" style="flex:1;">'+hOpts+'</select>'
+    +'<span style="color:var(--muted);">:</span>'
+    +'<select id="'+idPrefix+'-m" style="flex:1;">'+mOpts+'</select>'
+  +'</div>';
+}
+function getTimeSelectValue(idPrefix){
+  var h = document.getElementById(idPrefix+'-h');
+  var m = document.getElementById(idPrefix+'-m');
+  if(!h || !m || !h.value || !m.value) return '';
+  return h.value+':'+m.value;
+}
+function setTimeSelectValue(idPrefix, value){
+  var h = document.getElementById(idPrefix+'-h');
+  var m = document.getElementById(idPrefix+'-m');
+  if(!h || !m) return;
+  if(!value){ h.value=''; m.value=''; return; }
+  var parts = String(value).split(':');
+  var hh = Number(parts[0])||0, mm = Number(parts[1])||0;
+  var mmSnap = Math.round(mm/5)*5; // 5분단위 아닌 기존 값은 가장 가까운 5분단위로 스냅
+  if(mmSnap===60){ mmSnap=0; hh=(hh+1)%24; }
+  h.value = pad2(hh);
+  m.value = pad2(mmSnap);
+}
 // 같은 전화번호가 여러 본부/지점에 중복 등록돼 있을 수 있어 전화번호 기준으로 합쳐서 1인 1건만 발송
 function buildMgrList(){
   var byPhone = {};
@@ -4005,13 +4043,13 @@ function openQuickScheduleModal(empId){
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">시작일</label>'
     +'<input type="date" id="qs-date" value="'+today+'" onchange="document.getElementById(\'sched-end-date\').min=this.value;">'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">유형</label>'
-    +'<select id="qs-type"><option>컨택</option><option>코칭</option><option>교육</option><option>행사</option><option>본사미팅</option><option>ETC</option></select>'
+    +'<select id="qs-type"><option>컨택</option><option>교육</option><option>행사</option><option>본사미팅</option><option>ETC</option></select>'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">시간 (선택)</label>'
-    +'<input type="time" id="qs-time">'
+    +buildTimeSelectHtml('qs-time')
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">종료일 (선택, 비우면 당일만 · 여러 날이면 달력에 막대로 이어져 표시돼요)</label>'
     +'<input type="date" id="sched-end-date" min="'+today+'" onchange="toggleRangeVsRecur()">'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">종료시간 (선택)</label>'
-    +'<input type="time" id="sched-end-time">'
+    +buildTimeSelectHtml('sched-end-time')
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">장소 / 웹미팅 링크</label>'
     +'<input type="text" id="qs-location" placeholder="예: 강남 사무실, 또는 https://zoom.us/...">'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">반복</label>'
@@ -4041,7 +4079,7 @@ function saveQuickSchedule(empId){
   var date = document.getElementById('qs-date').value;
   if(!date){ showToast('날짜를 선택해주세요.'); return; }
   var type = document.getElementById('qs-type').value;
-  var time = document.getElementById('qs-time').value;
+  var time = getTimeSelectValue('qs-time');
   var endDate = document.getElementById('sched-end-date').value;
   if(endDate && endDate < date){ showToast('종료일은 시작일보다 빠를 수 없어요.'); return; }
   var location = document.getElementById('qs-location').value.trim();
@@ -4701,7 +4739,7 @@ function getSchedulesForDate(dateStr){
   return Object.keys(schedules).map(function(k){ return Object.assign({id:k}, schedules[k]); })
     .filter(function(s){ return scheduleOccursOnDate(s, dateStr); });
 }
-var _lastSchedHasTarget = true;
+var _lastSchedHasTarget = false;
 var _editingScheduleId = null;
 var _editingScheduleOriginDate = null; // 수정 시 원래 시작일 보존 (팝업을 연 날짜와 다를 수 있어서 별도 저장)
 function extractFirstUrl(str){
@@ -4746,8 +4784,11 @@ function buildActivityLogSectionHtml(dateStr){
       +'</span></div>'+expandBtn+memoLabel+'</div>';
   }).join('');
   return '<div style="border-top:1px solid var(--bd);padding-top:12px;margin-top:12px;">'
-    +'<div style="font-size:12.5px;font-weight:800;color:var(--good);margin-bottom:8px;">✅ 이 날 활동 기록 <span style="font-weight:400;color:var(--muted);">('+log.length+'건)</span></div>'
-    + rows
+    +'<div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="toggleCollapse(\'day-activity-log-body\')">'
+      +'<div style="font-size:12.5px;font-weight:800;color:var(--good);">✅ 이 날 활동 기록 <span style="font-weight:400;color:var(--muted);">('+log.length+'건)</span></div>'
+      +'<span class="arrow" id="day-activity-log-body-arrow" style="color:var(--muted);font-size:13px;">▸</span>'
+    +'</div>'
+    +'<div id="day-activity-log-body" style="display:none;margin-top:8px;">'+ rows +'</div>'
   +'</div>';
 }
 function openDayModal(dateStr){
@@ -4790,7 +4831,6 @@ function openDayModal(dateStr){
           +(p?'<button class="btn" style="font-size:11px;padding:5px 10px;" onclick="openProfile(\''+s.empId+'\')">프로필 보기</button>':'')
           +'</div></div>';
       }).join('') : '<div class="empty" style="padding:18px 0;">📭 예정된 일정이 없어요</div>') + '</div>'
-    + buildActivityLogSectionHtml(dateStr)
     +'<div style="border-top:1px solid var(--bd);padding-top:12px;margin-top:10px;">'
       +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">'
         +'<div id="sched-form-title" style="font-size:13px;font-weight:700;color:var(--accent);">+ 새 일정 추가</div>'
@@ -4799,23 +4839,27 @@ function openDayModal(dateStr){
       +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">시작일</label>'
       +'<input type="date" id="sched-start-date" value="'+dateStr+'" onchange="onSchedStartDateChange()">'
       +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">유형</label>'
-      +'<select id="sched-type"><option>컨택</option><option>코칭</option><option>교육</option><option>행사</option><option>본사미팅</option><option>ETC</option></select>'
+      +'<select id="sched-type"><option>컨택</option><option>교육</option><option>행사</option><option>본사미팅</option><option>ETC</option></select>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">'
+        +'<div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">장소 / 웹미팅 링크</label>'
+        +'<input type="text" id="sched-location" placeholder="예: 강남 사무실, 또는 https://zoom.us/..."></div>'
+        +'<div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">메모</label>'
+        +'<textarea id="sched-memo" rows="1" placeholder="목적, 확인할 것 등" style="min-height:38px;"></textarea></div>'
+      +'</div>'
       +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">시간 (선택)</label>'
-      +'<input type="time" id="sched-time">'
+      +buildTimeSelectHtml('sched-time')
       +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">종료일 (선택, 비우면 당일만 · 여러 날이면 달력에 막대로 이어져 표시돼요)</label>'
       +'<input type="date" id="sched-end-date" min="'+dateStr+'" onchange="toggleRangeVsRecur()">'
       +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">종료시간 (선택)</label>'
-      +'<input type="time" id="sched-end-time">'
-      +'<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;margin:10px 0 4px;cursor:pointer;white-space:nowrap;">'
-        +'<input type="checkbox" id="sched-has-target"'+(_lastSchedHasTarget?' checked':'')+' onchange="toggleSchedTargetFields()"> 대상자 지정'
+      +buildTimeSelectHtml('sched-end-time')
+      +'<label for="sched-has-target" style="display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;margin:12px 0 4px;cursor:pointer;background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;">'
+        +'<input type="checkbox" id="sched-has-target"'+(_lastSchedHasTarget?' checked':'')+' onchange="toggleSchedTargetFields()" style="width:20px;height:20px;flex-shrink:0;"> 🎯 대상자 지정'
       +'</label>'
-      +'<div id="sched-target-fields" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">'
+      +'<div id="sched-target-fields" style="display:'+(_lastSchedHasTarget?'grid':'none')+';grid-template-columns:1fr 1fr 1fr;gap:6px;">'
         +'<select id="sched-hq" onchange="schedHqChanged()" style="font-size:12px;padding:8px 6px;"></select>'
         +'<select id="sched-branch" onchange="schedBranchChanged()" style="font-size:12px;padding:8px 6px;"></select>'
         +'<select id="sched-person" style="font-size:12px;padding:8px 6px;"></select>'
       +'</div>'
-      +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">장소 / 웹미팅 링크</label>'
-      +'<input type="text" id="sched-location" placeholder="예: 강남 사무실, 또는 https://zoom.us/...">'
       +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">반복</label>'
       +'<select id="sched-recur-type" onchange="toggleRecurFields();toggleRangeVsRecur();">'
         +'<option value="none">반복 안 함</option>'
@@ -4833,10 +4877,9 @@ function openDayModal(dateStr){
         +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">반복 종료일 (선택, 비우면 계속 반복)</label>'
         +'<input type="date" id="sched-recur-until">'
       +'</div>'
-      +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">메모</label>'
-      +'<textarea id="sched-memo" rows="2" placeholder="목적, 확인할 것 등"></textarea>'
       +'<button id="sched-submit-btn" class="btn primary" style="width:100%;margin-top:8px;" onclick="saveSchedule(\''+dateStr+'\')">일정 추가</button>'
-    +'</div>';
+    +'</div>'
+    + buildActivityLogSectionHtml(dateStr);
   overlay.appendChild(box);
   document.body.appendChild(overlay);
   initSchedSelects();
@@ -4902,9 +4945,9 @@ function saveSchedule(dateStr){
   var hasTarget = document.getElementById('sched-has-target').checked;
   var empId = hasTarget ? document.getElementById('sched-person').value : '';
   var type = document.getElementById('sched-type').value;
-  var time = document.getElementById('sched-time').value;
+  var time = getTimeSelectValue('sched-time');
   var endDate = document.getElementById('sched-end-date').value;
-  var endTime = document.getElementById('sched-end-time').value;
+  var endTime = getTimeSelectValue('sched-end-time');
   if(endDate && endDate < anchorDate){ showToast('종료일은 시작일보다 빠를 수 없어요.'); return; }
   var location = document.getElementById('sched-location').value.trim();
   var memo = document.getElementById('sched-memo').value.trim();
@@ -4940,11 +4983,11 @@ function editSchedule(id, dateStr){
   var startEl = document.getElementById('sched-start-date');
   if(startEl){ startEl.value = s.date; startEl.min=''; }
   document.getElementById('sched-type').value = s.type||'컨택';
-  document.getElementById('sched-time').value = s.time||'';
+  setTimeSelectValue('sched-time', s.time||'');
   document.getElementById('sched-end-date').value = s.endDate||'';
   document.getElementById('sched-end-date').min = s.date;
   document.getElementById('sched-end-date').disabled = false;
-  document.getElementById('sched-end-time').value = s.endTime||'';
+  setTimeSelectValue('sched-end-time', s.endTime||'');
   document.getElementById('sched-location').value = s.location||'';
   document.getElementById('sched-memo').value = s.memo||'';
   var hasTarget = !!s.empId;
@@ -4976,11 +5019,11 @@ function cancelEditSchedule(dateStr){
   var startEl = document.getElementById('sched-start-date');
   if(startEl && dateStr){ startEl.value = dateStr; }
   document.getElementById('sched-type').value = '컨택';
-  document.getElementById('sched-time').value = '';
+  setTimeSelectValue('sched-time', '');
   document.getElementById('sched-end-date').value = '';
   document.getElementById('sched-end-date').min = dateStr||'';
   document.getElementById('sched-end-date').disabled = false;
-  document.getElementById('sched-end-time').value = '';
+  setTimeSelectValue('sched-end-time', '');
   document.getElementById('sched-location').value = '';
   document.getElementById('sched-memo').value = '';
   document.getElementById('sched-has-target').checked = _lastSchedHasTarget;
