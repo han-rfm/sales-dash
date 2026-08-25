@@ -6,8 +6,9 @@
 <title>한정훈 rFM Sales Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script async type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=e004c815a0d82df2fdf15e8960f1f6f4&libraries=services&autoload=false"></script>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&family=DM+Mono:wght@500&family=Gamja+Flower&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#ffffff;--sf:#f7f8fa;--sf2:#eef0f4;--sf3:#e2e5ec;
@@ -122,6 +123,23 @@ tr.row-clickable:hover{background:var(--sf2);}
 .cal-cell .sched{font-size:10px;background:var(--a2);color:var(--accent);border-radius:4px;padding:1px 4px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;box-sizing:border-box;display:block;}
 .toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:var(--sf3);color:var(--text);padding:10px 18px;border-radius:10px;font-size:13px;z-index:900;opacity:0;transition:opacity .2s;pointer-events:none;}
 .toast.show{opacity:1;}
+
+/* ---------- 롤링페이퍼 (A4, 손글씨 카드) ---------- */
+.rp-page{width:794px;min-height:1123px;background:#fffdf7;margin:0 auto 24px;padding:50px 40px 40px;box-shadow:0 2px 16px rgba(0,0,0,0.12);position:relative;box-sizing:border-box;}
+.rp-page-title{font-size:26px;font-weight:900;text-align:center;color:#333;margin-bottom:6px;font-family:'Noto Sans KR',sans-serif;}
+.rp-page-sub{font-size:12px;text-align:center;color:#999;margin-bottom:28px;font-family:'Noto Sans KR',sans-serif;}
+.rp-notes{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start;justify-content:center;}
+.rp-note{width:210px;min-height:150px;padding:16px;border-radius:3px;box-shadow:2px 3px 8px rgba(0,0,0,0.15);font-family:'Gamja Flower',cursive;font-size:17px;line-height:1.55;color:#3a3a3a;display:flex;flex-direction:column;justify-content:space-between;}
+.rp-note-msg{white-space:pre-wrap;word-break:break-word;}
+.rp-note-sign{align-self:flex-end;margin-top:10px;font-size:15px;color:#555;}
+.rp-page-footer{position:absolute;bottom:16px;right:24px;font-size:10px;color:#bbb;font-family:'Noto Sans KR',sans-serif;}
+@media print{
+  body *{visibility:hidden;}
+  #rp-print-area, #rp-print-area *{visibility:visible;}
+  #rp-print-area{position:absolute;left:0;top:0;width:auto;}
+  .rp-page{box-shadow:none;margin:0;page-break-after:always;width:210mm;min-height:297mm;}
+  @page{size:A4;margin:0;}
+}
 </style>
 </head>
 <body>
@@ -349,6 +367,7 @@ tr.row-clickable:hover{background:var(--sf2);}
         </select>
         <button class="btn" onclick="exportOrgListExcel()">📥 엑셀 다운로드</button>
         <button class="btn" onclick="openMgrReachModal()">👔 MGR Reach</button>
+        <button class="btn" onclick="openRollingPaperViewer()">💌 롤링페이퍼 보기</button>
         <button class="btn primary" onclick="openOrgReachModal()">🚀 Reach</button>
       </div>
       <div style="overflow-x:auto;">
@@ -542,6 +561,12 @@ tr.row-clickable:hover{background:var(--sf2);}
           <button class="btn" onclick="saveMessageTemplates()">저장</button>
           <button class="btn" onclick="resetMessageTemplate('surveyLink')">기본값으로</button>
         </div>
+        <label style="font-size:11px;color:var(--muted);display:block;margin:14px 0 4px;">편지요청(롤링페이퍼) 링크 문자</label>
+        <textarea id="cfg-tmpl-letterLink" rows="4" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:9px 12px;color:var(--text);font-family:inherit;font-size:13px;"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button class="btn" onclick="saveMessageTemplates()">저장</button>
+          <button class="btn" onclick="resetMessageTemplate('letterLink')">기본값으로</button>
+        </div>
       </div>
 
       <div class="card">
@@ -608,7 +633,7 @@ var FB_URL = 'https://cleaning-498705-default-rtdb.asia-southeast1.firebasedatab
 // ⚠ 서베이 링크는 location.origin/pathname으로 자동계산하지 않고 고정 배포주소를 씀.
 // (sales.html을 로컬 다운로드 파일로 열어서 발송 버튼을 누르면 location이 file:///... 이 되어
 //  링크가 깨지는 사고가 있었음 — 2026-08 확인. 항상 실제 배포 주소로 나가도록 고정.)
-var SURVEY_BASE_URL = 'https://han-rfm.github.io/sales-dash/';
+var SURVEY_BASE_URL = 'https://han-rfm.github.io/sales-dash/'; // survey.html, letter.html 등 공개페이지 전부 이 주소 기준
 var APP_PASSWORD = '777'; // 여기 원하는 비밀번호로 바꿔주세요. 페이지 소스보기하면 그대로 보이니, 남한테 공유 안 하는 링크에서만 쓰는 걸 권장드려요.
 var SOLAPI_API_KEY = 'NCS8HYGUCLJBXZU0';
 var SOLAPI_API_SECRET = 'SPTCPSWBN4DTCBKTVYBVI8URHNCOVEGC'; // ⚠ 브라우저 소스에 그대로 노출됩니다 (정훈님 동의하에 반영)
@@ -692,7 +717,8 @@ var fmMap = {};        // FM이름 -> {phone}
 var tipLinks = {};     // linkId -> {title, url, createdAt}
 var DEFAULT_MESSAGE_TEMPLATES = {
   surveyLink: '{name}님, eFSR 프로파일링을 위한 짧은 서베이입니다. 아래 링크에서 편하실 때 작성해주세요.\n{url}',
-  tipNotice: '안녕하세요, 이번 교육영상 공유드립니다.\n\n[{title}]\n{url}\n\n편하실 때 시청 부탁드려요 :)'
+  tipNotice: '안녕하세요, 이번 교육영상 공유드립니다.\n\n[{title}]\n{url}\n\n편하실 때 시청 부탁드려요 :)',
+  letterLink: '{name} eFSR님, 마음의 선물을 잘 받으셨나요?\n소속 지점에 아래 폼링크로\n감사의 한마디 남겨주시겠어요?\n항상 응원합니다!\n{url}'
 };
 // 서베이 척도(5점, 낮을수록 챙겨야 할 신호) 기반 "이달의 추천 액션" 기본 라벨/기준값 — 이름은 설정에서 자유롭게 수정 가능
 var DEFAULT_INTERVENTION_CONFIG = {
@@ -716,6 +742,7 @@ var surveyTemplate = null;   // { sections: [ {id,title,visibility:'shared'|'pri
 var surveyResponses = {};    // empId -> { responseId: { submittedAt, sections:[{title,items:[{label,value}]}] } }
 var surveyReopened = {};     // empId -> true : 정훈님이 '재참여 허용' 누른 사람. 서베이 제출 완료되면 자동 잠김(플래그 삭제)
 var campaignMeta = {};       // campaignTag -> {tag, title, createdAt} : 단체 Reach 보낼 때 적은 제목/목적
+var rollingLetters = {};     // empId -> {empId, name, hq, branch, message, submittedAt} : 방문완료 eFSR이 남긴 지점 편지
 function sanitizeFbKey(s){ return String(s).replace(/[.#$/\[\]]/g, '_'); }
 
 // 5점 리커트 척도 공통 옵션 (scale 타입 필드는 항상 이 5개 사용)
@@ -942,7 +969,8 @@ function boot(){
     fetch(FB_URL+ROOT+'/tipLinks.json').then(function(r){return r.json();}),
     fetch(FB_URL+ROOT+'/surveyScoreSnapshots.json').then(function(r){return r.json();}),
     fetch(FB_URL+ROOT+'/surveyReopened.json').then(function(r){return r.json();}),
-    fetch(FB_URL+ROOT+'/campaignMeta.json').then(function(r){return r.json();})
+    fetch(FB_URL+ROOT+'/campaignMeta.json').then(function(r){return r.json();}),
+    fetch(FB_URL+ROOT+'/rollingLetters.json').then(function(r){return r.json();})
   ]).then(function(res){
     people = res[0]||{};
     snapshots = res[1]||{};
@@ -968,6 +996,7 @@ function boot(){
     var campaignMetaRaw = res[14]||{};
     campaignMeta = {};
     Object.values(campaignMetaRaw).forEach(function(m){ if(m && m.tag) campaignMeta[m.tag] = m; });
+    rollingLetters = res[15]||{};
     if(res[8]){
       surveyTemplate = res[8];
       // 라벨·기준값은 절대 건드리지 않고, 필드id가 일치하는데 S/W 태그가 비어있는 곳만 조용히 채워넣음
@@ -2922,6 +2951,11 @@ function renderOrgList(){
           +'<input type="checkbox" '+(people[r.id]&&people[r.id].chk1?'checked':'')+' onclick="event.stopPropagation();" onchange="toggleOrgChk(\''+r.id+'\',1,this.checked)" style="width:auto;vertical-align:middle;">'
           +'<input type="checkbox" '+(people[r.id]&&people[r.id].chk2?'checked':'')+' onclick="event.stopPropagation();" onchange="toggleOrgChk(\''+r.id+'\',2,this.checked)" style="width:auto;vertical-align:middle;margin-left:4px;">'
         +'</span>'
+        +(people[r.id]&&people[r.id].chk1&&people[r.id].chk2 ?
+          (rollingLetters[r.id]
+            ? ' <span class="badge" style="background:#e6f6ee;color:var(--good);font-size:9.5px;padding:2px 6px;">💌 편지도착</span>'
+            : ' <button class="btn" style="font-size:10px;padding:2px 7px;" onclick="event.stopPropagation();sendLetterRequest(\''+r.id+'\')">✉️ 편지요청</button>')
+          : '')
         +(r.terminated?' <span class="badge" style="background:#fdeaee;color:var(--danger);font-size:9.5px;padding:1px 5px;">해촉</span>':'')
         +(r.terminationCandidate?' <span class="badge" style="background:#fff6e5;color:#8a5a00;font-size:9.5px;padding:1px 5px;">소통불가</span>':'')
       +'</td>'
@@ -4119,6 +4153,99 @@ function reopenSurveyFor(empId){
       openProfile(empId);
     })
     .catch(function(){ showToast('재참여 허용 처리 실패'); });
+}
+/* ---------- 롤링페이퍼 보기/인쇄 (본부별로 묶어서 A4 카드로 렌더) ---------- */
+var RP_COLORS = ['#fff4d6','#ffe3e3','#e3f2ff','#e8f9e9','#f3e8ff','#fff0e6','#e0fbfc'];
+function openRollingPaperViewer(){
+  var hqs = [...new Set(Object.values(rollingLetters).map(function(l){return l.hq;}).filter(Boolean))].sort();
+  var overlay=document.createElement('div');
+  overlay.className='modal-overlay';
+  overlay.onclick=function(e){ if(e.target===overlay) overlay.remove(); };
+  var box=document.createElement('div');
+  box.className='modal-box'; box.style.position='relative'; box.style.maxWidth='860px'; box.style.width='95vw';
+  box.innerHTML = '<button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button>'
+    +'<div class="card-title" style="margin-bottom:10px;">💌 롤링페이퍼 보기</div>'
+    +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">'
+      +'<select id="rp-hq-select" onchange="renderRollingPaperForHq()" style="width:auto;font-size:13px;padding:8px 10px;">'
+        + (hqs.length ? hqs.map(function(h){return '<option value="'+h+'">'+h+'</option>';}).join('') : '<option value="">편지가 아직 없어요</option>')
+      +'</select>'
+      +'<button class="btn primary" onclick="window.print()">🖨 인쇄 / PDF로 저장</button>'
+      +'<button class="btn" onclick="saveRollingPaperAsImage()">🖼 이미지로 저장</button>'
+      +'<button class="btn" onclick="sendTestLetterToMe()">🧪 나에게 테스트 링크 보내기</button>'
+    +'</div>'
+    +'<div style="max-height:70vh;overflow-y:auto;background:#e9ebef;padding:20px 0;border-radius:10px;">'
+      +'<div id="rp-print-area"></div>'
+    +'</div>';
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  if(hqs.length) renderRollingPaperForHq();
+}
+function renderRollingPaperForHq(){
+  var hqEl = document.getElementById('rp-hq-select');
+  var hq = hqEl ? hqEl.value : '';
+  var area = document.getElementById('rp-print-area');
+  if(!area) return;
+  var letters = Object.values(rollingLetters).filter(function(l){ return l.hq===hq; })
+    .sort(function(a,b){ return (a.submittedAt||'').localeCompare(b.submittedAt||''); });
+  if(!letters.length){ area.innerHTML = '<div class="empty" style="padding:40px;">이 본부엔 아직 편지가 없어요.</div>'; return; }
+  var PER_PAGE = 15;
+  var pages = [];
+  for(var i=0;i<letters.length;i+=PER_PAGE){ pages.push(letters.slice(i, i+PER_PAGE)); }
+  area.innerHTML = pages.map(function(pageLetters, pageIdx){
+    var notesHtml = pageLetters.map(function(l){
+      var rot = (Math.random()*12-6).toFixed(1);
+      var jitter = Math.round(Math.random()*14-7);
+      var bg = RP_COLORS[Math.floor(Math.random()*RP_COLORS.length)];
+      var safeMsg = String(l.message||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return '<div class="rp-note" style="background:'+bg+';transform:rotate('+rot+'deg) translateY('+jitter+'px);">'
+        +'<div class="rp-note-msg">'+safeMsg+'</div>'
+        +'<div class="rp-note-sign">From '+(l.name||'?')+' eFSR</div>'
+      +'</div>';
+    }).join('');
+    return '<div class="rp-page">'
+      +'<div class="rp-page-title">💌 '+hq+'에 보내는 편지</div>'
+      +'<div class="rp-page-sub">'+letters.length+'명의 마음을 모았어요'+(pages.length>1?' · '+(pageIdx+1)+'/'+pages.length+'페이지':'')+'</div>'
+      +'<div class="rp-notes">'+notesHtml+'</div>'
+      +'<div class="rp-page-footer">'+hq+' 롤링페이퍼</div>'
+    +'</div>';
+  }).join('');
+}
+function saveRollingPaperAsImage(){
+  var pages = document.querySelectorAll('#rp-print-area .rp-page');
+  if(!pages.length){ showToast('저장할 편지가 없어요.'); return; }
+  if(typeof html2canvas==='undefined'){ showToast('이미지 저장 기능을 불러오지 못했어요. 인터넷 연결을 확인해주세요.'); return; }
+  var hqEl = document.getElementById('rp-hq-select');
+  var hq = hqEl ? hqEl.value : '롤링페이퍼';
+  showToast('이미지 생성 중...');
+  Promise.all(Array.from(pages).map(function(pageEl, i){
+    return html2canvas(pageEl, {scale:2, backgroundColor:'#fffdf7'}).then(function(canvas){ return {canvas:canvas, index:i}; });
+  })).then(function(results){
+    results.forEach(function(r){
+      var link = document.createElement('a');
+      link.download = '롤링페이퍼_'+hq+(results.length>1?'_'+(r.index+1):'')+'.png';
+      link.href = r.canvas.toDataURL('image/png');
+      document.body.appendChild(link); link.click(); link.remove();
+    });
+    showToast('이미지 저장 완료 ('+results.length+'장)');
+  }).catch(function(err){ showToast('이미지 생성 실패: '+err); });
+}
+// 실제 명단을 건드리지 않는 테스트 전용 편지요청 링크(id=test)를 정훈님 번호로 발송
+function sendTestLetterToMe(){
+  var url = SURVEY_BASE_URL + 'letter.html?id=test';
+  var text = fillTemplate(appConfig.messageTemplates.letterLink, {name:'테스트', url:url})
+    + '\n\n(🧪 테스트 링크 — 제출해도 실제 명단에는 반영되지 않아요)';
+  openSendReviewModal([{ id:'testself'+Date.now(), name:'나(테스트)', phone:'01092925782', text:text }]);
+}
+// 방문완료(체크박스 2개) eFSR에게 "우리 지점에 편지 남기기" 링크 발송
+function sendLetterRequest(empId){
+  var p = people[empId];
+  if(!p || !p.phone){ showToast('전화번호가 없어요.'); return; }
+  if(rollingLetters[empId]){
+    if(!confirm(p.name+'님은 이미 편지를 남기셨어요.\n그래도 링크를 다시 보내시겠어요? (다시 보내도 이미 낸 편지는 그대로 있고, 재제출은 안 돼요)')) return;
+  }
+  var url = SURVEY_BASE_URL + 'letter.html?id=' + empId;
+  var text = fillTemplate(appConfig.messageTemplates.letterLink, {name:p.name, url:url});
+  sendSingleSms(empId, p.phone, text, 'letter_link');
 }
 function sendSurveyLink(empId){
   var p = people[empId];
@@ -5649,6 +5776,8 @@ function renderConfigSettings(){
   if(el) el.value = appConfig.contactCycleDays;
   var tEl = document.getElementById('cfg-tmpl-surveyLink');
   if(tEl) tEl.value = appConfig.messageTemplates.surveyLink;
+  var lEl = document.getElementById('cfg-tmpl-letterLink');
+  if(lEl) lEl.value = appConfig.messageTemplates.letterLink;
   var esEl = document.getElementById('cfg-esmap-th');
   if(esEl) esEl.value = appConfig.esmapThreshold;
   var tipThEl = document.getElementById('cfg-tip-th');
@@ -5704,6 +5833,8 @@ function saveInterventionConfig(){
 }
 function saveMessageTemplates(){
   appConfig.messageTemplates.surveyLink = document.getElementById('cfg-tmpl-surveyLink').value;
+  var lEl = document.getElementById('cfg-tmpl-letterLink');
+  if(lEl) appConfig.messageTemplates.letterLink = lEl.value;
   fetch(FB_URL+ROOT+'/config.json',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({messageTemplates:appConfig.messageTemplates})});
   showToast('문구가 저장됐어요.');
 }
