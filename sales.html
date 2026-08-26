@@ -355,7 +355,7 @@ tr.row-clickable:hover{background:var(--sf2);}
         <div id="org-chart-summary" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;"></div>
       </div>
       <div class="filter-row">
-        <input type="text" id="org-search" placeholder="이름, 지점 검색" oninput="renderOrgList()">
+        <input type="text" id="org-search" placeholder="이름, 지점, 전화번호 검색" oninput="renderOrgList()">
         <select id="org-filter-hq" onchange="orgFilterHqChanged()"><option value="">전체 본부</option></select>
         <select id="org-filter-branch" onchange="renderOrgList()"><option value="">전체 지점</option></select>
         <select id="org-filter-seg" onchange="renderOrgList()"><option value="">Seg 전체</option><option>A</option><option>B</option><option>C</option><option>D</option><option>E</option></select>
@@ -2896,7 +2896,8 @@ function getOrgRows(){
   var ids = Object.keys(people).filter(function(id){
     var p = people[id];
     var tagsStr = (p.tags||[]).join(' ');
-    if(q && !((p.name||'').includes(q) || (p.branch||'').includes(q) || tagsStr.includes(q))) return false;
+    var phoneStr = (p.phone||'').replace(/[^0-9]/g,'');
+    if(q && !((p.name||'').includes(q) || (p.branch||'').includes(q) || tagsStr.includes(q) || (q.replace(/[^0-9]/g,'') && phoneStr.includes(q.replace(/[^0-9]/g,''))))) return false;
     if(fHq && p.hq!==fHq) return false;
     if(fBranch && p.branch!==fBranch) return false;
     if(fSeg && p.seg!==fSeg) return false;
