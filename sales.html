@@ -242,6 +242,7 @@ tr.row-clickable:hover{background:var(--sf2);}
           <div id="campaign-effect-empty" class="empty" style="display:none;">아직 캠페인 태그가 붙은 발송 기록이 없어요. Reach 보낼 때 캠페인 태그(+제목)를 입력하면 여기 쌓여요.</div>
           <div id="campaign-list-body"></div>
           <div id="campaign-effect-body" style="display:none;border-top:1px solid var(--bd);margin-top:12px;padding-top:12px;">
+            <div id="ce-rounds" style="margin-bottom:10px;"></div>
             <div id="ce-metrics-table"></div>
           </div>
         </div>
@@ -1889,6 +1890,21 @@ function campaignTagSummary(tag){
     recipientCount: Object.keys(empIds).length
   };
 }
+// 같은 캠페인 태그로 여러 날 나눠 보낸 경우, 발송일(날짜)별로 몇 명한테 갔는지 차수 구분해서 반환
+function campaignTagRoundBreakdown(tag){
+  var byDate = {}; // "YYYY-MM-DD" -> Set(empId)
+  Object.keys(contacts).forEach(function(id){
+    Object.values(contacts[id]||{}).forEach(function(c){
+      if(c.campaignTag!==tag || !c.date) return;
+      var d = String(c.date).slice(0,10);
+      if(!byDate[d]) byDate[d] = new Set();
+      byDate[d].add(id);
+    });
+  });
+  return Object.keys(byDate).sort().map(function(d, idx){
+    return { date: d, count: byDate[d].size, roundNum: idx+1 };
+  });
+}
 function renderCampaignEffectChart(){
   var listEl = document.getElementById('campaign-list-body');
   var emptyEl = document.getElementById('campaign-effect-empty');
@@ -1906,16 +1922,29 @@ function renderCampaignEffectChart(){
   if(!_selectedCampaignTag || tags.indexOf(_selectedCampaignTag)===-1) _selectedCampaignTag = summaries[0].tag;
   listEl.innerHTML = summaries.map(function(s){
     var isSel = s.tag===_selectedCampaignTag;
+    var rounds = campaignTagRoundBreakdown(s.tag);
+    var dateLabel = rounds.length>1
+      ? (fmtDateShort(rounds[0].date)+'~'+fmtDateShort(rounds[rounds.length-1].date)+' · '+rounds.length+'차')
+      : (s.firstDate?fmtDateShort(s.firstDate):'-');
     return '<div onclick="selectCampaignTag(\''+s.tag.replace(/'/g,"\\'")+'\')" style="cursor:pointer;padding:9px 10px;border-radius:8px;margin-bottom:4px;background:'+(isSel?'var(--a2)':'var(--sf2)')+';border:1px solid '+(isSel?'var(--accent)':'var(--bd)')+';">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'
         +'<div style="font-size:12.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+s.title+'</div>'
-        +'<div style="font-size:10.5px;color:var(--muted);flex-shrink:0;">'+(s.firstDate?fmtDateShort(s.firstDate):'-')+' · '+s.recipientCount+'명</div>'
+        +'<div style="font-size:10.5px;color:var(--muted);flex-shrink:0;">'+dateLabel+' · '+s.recipientCount+'명</div>'
       +'</div>'
       +(s.title!==s.tag ? '<div style="font-size:10px;color:var(--muted);margin-top:2px;">🏷 '+s.tag+'</div>' : '')
     +'</div>';
   }).join('');
   var res = computeCampaignEffect(_selectedCampaignTag);
   if(bodyEl) bodyEl.style.display='block';
+  var roundEl = document.getElementById('ce-rounds');
+  if(roundEl){
+    var rounds = campaignTagRoundBreakdown(_selectedCampaignTag);
+    roundEl.innerHTML = rounds.length ? ('<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">발송 차수별 내역</div>'
+      + rounds.map(function(r){
+          return '<span style="display:inline-block;background:var(--sf2);border-radius:6px;padding:4px 9px;margin:0 6px 6px 0;font-size:11.5px;">'
+            + r.roundNum+'차 ('+fmtDateShort(r.date)+') · '+r.count+'명</span>';
+        }).join('')) : '';
+  }
   renderCampaignEffectMetricsTable(res);
 }
 function renderCampaignEffectMetricsTable(res){
