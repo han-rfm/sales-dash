@@ -1138,6 +1138,13 @@ function lastSurveyLinkSentDate(empId){
   var dates = Object.values(c).filter(function(x){ return x.type==='survey_link' && x.date; }).map(function(x){ return String(x.date).slice(0,10); }).sort();
   return dates.length ? dates[dates.length-1] : null;
 }
+// 편지요청 링크를 이 사람에게 보낸 적이 있는지(가장 최근 발송일) 조회. sendLetterRequest에서 'letter_link' 타입으로 로그됨.
+function lastLetterSentDate(empId){
+  var c = contacts[empId];
+  if(!c) return null;
+  var dates = Object.values(c).filter(function(x){ return x.type==='letter_link' && x.date; }).map(function(x){ return String(x.date).slice(0,10); }).sort();
+  return dates.length ? dates[dates.length-1] : null;
+}
 function allContactStats(empId){
   var dates = [];
   var n = notes[empId];
@@ -2987,7 +2994,9 @@ function renderOrgList(){
         +(people[r.id]&&people[r.id].chk1&&people[r.id].chk2 ?
           (rollingLetters[r.id]
             ? ' <span class="badge" style="background:#e6f6ee;color:var(--good);font-size:9.5px;padding:2px 6px;">💌 편지도착</span>'
-            : ' <button class="btn" style="font-size:10px;padding:2px 7px;" onclick="event.stopPropagation();sendLetterRequest(\''+r.id+'\')">✉️ 편지요청</button>')
+            : lastLetterSentDate(r.id)
+              ? ' <span class="badge" style="background:#fff6e5;color:#8a5a00;font-size:9.5px;padding:2px 6px;" title="발송일: '+lastLetterSentDate(r.id)+'">📨 발송함·미회신</span> <button class="btn" style="font-size:10px;padding:2px 7px;" onclick="event.stopPropagation();sendLetterRequest(\''+r.id+'\')">🔁 재발송</button>'
+              : ' <button class="btn" style="font-size:10px;padding:2px 7px;" onclick="event.stopPropagation();sendLetterRequest(\''+r.id+'\')">✉️ 편지요청</button>')
           : '')
         +(r.terminated?' <span class="badge" style="background:#fdeaee;color:var(--danger);font-size:9.5px;padding:1px 5px;">해촉</span>':'')
         +(r.terminationCandidate?' <span class="badge" style="background:#fff6e5;color:#8a5a00;font-size:9.5px;padding:1px 5px;">소통불가</span>':'')
@@ -3667,7 +3676,12 @@ function buildProfileHtml(empId, p){
   +'<div class="profile-header">'
     +'<div style="display:flex;align-items:center;gap:8px;">'
       +'<span onclick="toggleFav(\''+empId+'\')" style="cursor:pointer;font-size:20px;color:'+(p.fav?'var(--warn)':'var(--bd)')+';">★</span>'
-      +'<div><div class="profile-name">'+p.name+' <span style="font-size:12px;color:var(--muted);">'+(p.position||'')+'</span></div>'
+      +'<div><div class="profile-name">'+p.name+' <span style="font-size:12px;color:var(--muted);">'+(p.position||'')+'</span>'
+        +'<span style="margin-left:8px;">'
+          +'<input type="checkbox" '+(p.chk1?'checked':'')+' onchange="toggleOrgChk(\''+empId+'\',1,this.checked)" style="width:auto;vertical-align:middle;">'
+          +'<input type="checkbox" '+(p.chk2?'checked':'')+' onchange="toggleOrgChk(\''+empId+'\',2,this.checked)" style="width:auto;vertical-align:middle;margin-left:4px;">'
+        +'</span>'
+      +'</div>'
       +'<div class="profile-sub">'+(p.hq||'')+' · '+(p.branch||'')+' <span style="color:'+branchColor(p.branch)+';">●</span></div></div>'
     +'</div>'
     +'<div style="display:flex;gap:6px;flex-wrap:wrap;">'
@@ -3696,12 +3710,19 @@ function buildProfileHtml(empId, p){
     +'<tr><td class="k">위촉일자</td><td>'+fmtDate8(p.joinDate)+'</td><td class="k">재위촉일자</td><td>'+fmtDate8(p.rejoinDate)+'</td></tr>'
   +'</table>'
   +'<div style="margin:10px 0;">'
+    +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">전화번호</label>'
+    +'<div style="display:flex;gap:6px;">'
+      +'<input type="text" id="phone-'+empId+'" value="'+(p.phone||'')+'" placeholder="전화번호 없음" readonly style="font-size:12.5px;">'
+      +'<button class="btn" onclick="copyToClipboard(\''+(p.phone||'')+'\')">복사</button>'
+    +'</div></div>'
+  +'<div style="margin:10px 0;">'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">사무실 주소</label>'
     +'<div style="display:flex;gap:6px;">'
       +'<input type="text" id="office-addr-'+empId+'" value="'+(p.officeAddress||'')+'" placeholder="예: 서울시 강남구 ..." style="font-size:12.5px;">'
       +'<button class="btn" onclick="copyOfficeAddress(\''+empId+'\')">복사</button>'
       +'<button class="btn" onclick="saveOfficeAddress(\''+empId+'\')">저장</button>'
     +'</div></div>'
+  + buildScheduleHistoryHtml(empId)
   +'<div class="metric-grid">'
     +metricCell('Seg', p.seg)+metricCell('C/R', p.cr)+metricCell('eFSR', p.efsr)+metricCell('PSP', p.psp)
     +metricCell('H/C', p.hc)+metricCell('BNW', p.bnw)+metricCell('S/W', p.sw)+metricCell('변액', p.byunaek?p.byunaek:'보유')
@@ -4638,6 +4659,35 @@ function deleteNote(empId, noteId){
   fetch(FB_URL+ROOT+'/notes/'+empId+'/'+noteId+'.json',{method:'DELETE'});
   delete notes[empId][noteId];
   document.getElementById('notes-'+empId).innerHTML = renderNotesHtml(empId);
+}
+// 프로필용 "약속 히스토리" — 이 사람과 잡았던(잡을) 일정을 최신순으로 보여줌
+function buildScheduleHistoryHtml(empId){
+  var ids = Object.keys(schedules).filter(function(id){ return schedules[id].empId===empId; })
+    .sort(function(a,b){ return (schedules[b].date||'').localeCompare(schedules[a].date||''); });
+  if(!ids.length) return '';
+  var today = new Date().toISOString().slice(0,10);
+  var rows = ids.map(function(id){
+    var s = schedules[id];
+    var isPast = (s.date||'') < today;
+    var dateLabel = fmtDate8(s.date) + (s.endDate ? ' ~ '+fmtDate8(s.endDate) : '');
+    var timeLabel = s.time ? ' '+s.time : '';
+    var detailParts = [s.type||'컨택'];
+    if(s.location) detailParts.push(s.location);
+    if(s.memo) detailParts.push(s.memo);
+    return '<div style="padding:7px 0;border-bottom:1px solid var(--bd);font-size:12px;cursor:pointer;" onclick="this.closest(\'.modal-overlay\').remove();openDayModal(\''+s.date+'\')">'
+      +'<span style="color:'+(isPast?'var(--muted)':'var(--accent)')+';font-weight:700;">'+dateLabel+timeLabel+'</span>'
+      +' · '+detailParts.join(' · ')
+    +'</div>';
+  }).join('');
+  return '<div style="margin:10px 0;">'
+    +'<div style="font-size:11px;color:var(--muted);margin-bottom:4px;">📅 약속 히스토리 ('+ids.length+'건)</div>'
+    +'<div style="max-height:180px;overflow-y:auto;">'+rows+'</div>'
+  +'</div>';
+}
+function copyToClipboard(val){
+  val = (val||'').trim();
+  if(!val){ showToast('복사할 내용이 없어요.'); return; }
+  navigator.clipboard.writeText(val).then(function(){ showToast('복사됐어요.'); });
 }
 function copyOfficeAddress(empId){
   var val = document.getElementById('office-addr-'+empId).value.trim();
