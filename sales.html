@@ -585,7 +585,7 @@ tr.row-clickable:hover{background:var(--sf2);}
         <p style="font-size:12px;color:var(--muted);margin-bottom:10px;">본부/지점별 프로모션 사진(구글드라이브·네이버밴드드라이브 등 공유링크)이나 문구를 등록해두면, 조직도 탭에서 Reach 보낼 때 "📎 프로모션 자료 첨부"로 골라서 문자에 자동으로 끼워넣을 수 있어요.</p>
         <div class="grid-2" style="margin-bottom:8px;">
           <select id="promo-hq"></select>
-          <select id="promo-branch"></select>
+          <select id="promo-branch" onchange="onPromoBranchAutoPair()"></select>
         </div>
         <div class="grid-2" style="margin-bottom:8px;">
           <select id="promo-type">
@@ -595,7 +595,8 @@ tr.row-clickable:hover{background:var(--sf2);}
           <input type="text" id="promo-title" placeholder="제목 (예: 8월 이벤트 포스터)">
         </div>
         <textarea id="promo-content" rows="2" placeholder="사진이면 공유링크 URL, 텍스트면 내용 그대로 입력" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:9px 12px;color:var(--text);font-family:inherit;font-size:13px;margin-bottom:8px;"></textarea>
-        <button class="btn primary" onclick="addPromoAsset()">자료 추가</button>
+        <button class="btn primary" id="promo-submit-btn" onclick="addPromoAsset()">자료 추가</button>
+        <button class="btn" id="promo-cancel-edit-btn" onclick="cancelEditPromoAsset()" style="display:none;margin-left:6px;">취소</button>
         <div id="promo-stats-rows" style="margin-top:14px;"></div>
         <div id="promo-asset-rows" style="margin-top:8px;"></div>
       </div>
@@ -6022,16 +6023,16 @@ function saveConfig(){
 function buildPromoAssetOptions(hq, branch){
   var ids = Object.keys(promoAssets).filter(function(id){
     var a = promoAssets[id];
-    if(!hq) return true;
-    if(!a.hq) return true; // 전체공통 자료는 항상 후보
-    if(a.hq!==hq) return false;
-    if(a.branch && a.branch!==branch) return false;
+    if(!a.hq && !a.branch) return true; // 본부·지점 둘 다 안 정했으면 진짜 전체공통 → 항상 후보
+    if(!hq) return true; // 지금 Reach 모달에 조직 컨텍스트가 없으면(전체대상 등) 필터링 불가 → 다 보여줌
+    if(a.hq && a.hq!==hq) return false;       // 본부를 지정했는데 다른 본부면 제외
+    if(a.branch && a.branch!==branch) return false; // 지점을 지정했는데(본부는 비웠어도) 다른 지점이면 제외
     return true;
   }).sort(function(a,b){ return (promoAssets[b].createdAt||'').localeCompare(promoAssets[a].createdAt||''); });
   var opts = '<option value="">자료 선택 안 함</option>';
   opts += ids.map(function(id){
     var a = promoAssets[id];
-    var orgLabel = a.hq ? (a.hq+(a.branch?'/'+a.branch:'')) : '공통';
+    var orgLabel = (a.hq||a.branch) ? ((a.hq||'')+(a.branch?'/'+a.branch:'')) : '공통';
     var label = ((a.type==='photo')?'🖼':'📝')+' '+a.title+' ('+orgLabel+')';
     return '<option value="'+id+'">'+label.replace(/</g,'&lt;')+'</option>';
   }).join('');
@@ -6047,6 +6048,14 @@ function applyPromoAssetToGsms(){
   textEl.value = textEl.value.trim() ? (textEl.value+'\n\n'+insertText) : insertText;
 }
 /* ---------- 프로모션 자료함 (본부/지점별 사진링크·텍스트) ---------- */
+// 지점 고르면 본부를 자동으로 채워줌 (발송 대상 범위는 그대로 "그 지점만" — 나중에 본부 단위로 집계 합산할 때 정확히 묶이도록 하기 위함)
+function onPromoBranchAutoPair(){
+  var brEl = document.getElementById('promo-branch');
+  var hqEl = document.getElementById('promo-hq');
+  if(!brEl || !hqEl || !brEl.value) return;
+  var matchId = Object.keys(people).find(function(id){ return people[id].branch===brEl.value; });
+  if(matchId && people[matchId].hq) hqEl.value = people[matchId].hq;
+}
 function initPromoAssetSelects(){
   var hqs = [...new Set(Object.values(people).map(function(p){return p.hq;}).filter(Boolean))].sort();
   var branches = [...new Set(Object.values(people).map(function(p){return p.branch;}).filter(Boolean))].sort();
@@ -6055,6 +6064,7 @@ function initPromoAssetSelects(){
   if(hqEl) hqEl.innerHTML = '<option value="">본부 (전체 공통이면 비워두세요)</option>' + hqs.map(function(h){return '<option>'+h+'</option>';}).join('');
   if(brEl) brEl.innerHTML = '<option value="">지점 (본부 전체면 비워두세요)</option>' + branches.map(function(b){return '<option>'+b+'</option>';}).join('');
 }
+var _editingPromoAssetId = null;
 function addPromoAsset(){
   var hq = document.getElementById('promo-hq').value;
   var branch = document.getElementById('promo-branch').value;
@@ -6062,19 +6072,45 @@ function addPromoAsset(){
   var title = document.getElementById('promo-title').value.trim();
   var content = document.getElementById('promo-content').value.trim();
   if(!title || !content){ showToast('제목과 내용(링크)을 모두 입력해주세요.'); return; }
-  var id = 'promo'+Date.now();
-  var entry = { hq:hq||null, branch:branch||null, type:type, title:title, content:content, createdAt:new Date().toISOString() };
+  var id = _editingPromoAssetId || ('promo'+Date.now());
+  var prevCreatedAt = _editingPromoAssetId && promoAssets[id] ? promoAssets[id].createdAt : null;
+  var entry = { hq:hq||null, branch:branch||null, type:type, title:title, content:content, createdAt: prevCreatedAt || new Date().toISOString() };
   fetch(FB_URL+ROOT+'/promoAssets/'+id+'.json',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(entry)});
   promoAssets[id] = entry;
+  var wasEditing = !!_editingPromoAssetId;
+  cancelEditPromoAsset();
+  renderPromoAssetSettings();
+  showToast(wasEditing ? '프로모션 자료가 수정됐어요.' : '프로모션 자료가 추가됐어요.');
+}
+function editPromoAsset(id){
+  var a = promoAssets[id];
+  if(!a) return;
+  _editingPromoAssetId = id;
+  document.getElementById('promo-hq').value = a.hq||'';
+  document.getElementById('promo-branch').value = a.branch||'';
+  document.getElementById('promo-type').value = a.type||'photo';
+  document.getElementById('promo-title').value = a.title||'';
+  document.getElementById('promo-content').value = a.content||'';
+  var btn = document.getElementById('promo-submit-btn');
+  if(btn){ btn.textContent = '✏️ 수정 저장'; }
+  var cancelBtn = document.getElementById('promo-cancel-edit-btn');
+  if(cancelBtn) cancelBtn.style.display = 'inline-block';
+  document.getElementById('promo-title').scrollIntoView({behavior:'smooth', block:'center'});
+}
+function cancelEditPromoAsset(){
+  _editingPromoAssetId = null;
   document.getElementById('promo-title').value='';
   document.getElementById('promo-content').value='';
-  renderPromoAssetSettings();
-  showToast('프로모션 자료가 추가됐어요.');
+  var btn = document.getElementById('promo-submit-btn');
+  if(btn){ btn.textContent = '자료 추가'; }
+  var cancelBtn = document.getElementById('promo-cancel-edit-btn');
+  if(cancelBtn) cancelBtn.style.display = 'none';
 }
 function deletePromoAsset(id){
   if(!confirm('이 프로모션 자료를 삭제할까요?')) return;
   fetch(FB_URL+ROOT+'/promoAssets/'+id+'.json',{method:'DELETE'});
   delete promoAssets[id];
+  if(_editingPromoAssetId===id) cancelEditPromoAsset();
   renderPromoAssetSettings();
 }
 function renderPromoAssetSettings(){
@@ -6089,8 +6125,8 @@ function renderPromoAssetSettings(){
     var byOrg = {};
     ids.forEach(function(id){
       var a = promoAssets[id];
-      if(!a.hq) return; // 전체공통은 조직별 집계에서 제외
-      var key = a.hq + (a.branch?'/'+a.branch:'');
+      if(!a.hq && !a.branch) return; // 진짜 전체공통만 조직별 집계에서 제외
+      var key = (a.hq||'')+(a.branch?'/'+a.branch:'');
       if(!byOrg[key]) byOrg[key] = {total:0, thisMonth:0};
       byOrg[key].total++;
       if((a.createdAt||'').slice(0,7)===thisMonthPrefix) byOrg[key].thisMonth++;
@@ -6107,7 +6143,7 @@ function renderPromoAssetSettings(){
   if(!ids.length){ listEl.innerHTML='<div class="empty">등록된 자료가 없어요.</div>'; return; }
   listEl.innerHTML = ids.map(function(id){
     var a = promoAssets[id];
-    var orgLabel = a.hq ? (a.hq+(a.branch?'/'+a.branch:'')) : '전체 공통';
+    var orgLabel = (a.hq||a.branch) ? ((a.hq||'')+(a.branch?'/'+a.branch:'')) : '전체 공통';
     var contentPreview = a.type==='photo'
       ? '<a href="'+a.content+'" target="_blank" style="font-size:11px;color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;">'+a.content+'</a>'
       : '<div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+a.content+'</div>';
@@ -6116,6 +6152,7 @@ function renderPromoAssetSettings(){
         +'<div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(a.type==='photo'?'🖼':'📝')+' '+a.title+' <span style="font-size:10px;color:var(--muted);">('+orgLabel+')</span></div>'
         + contentPreview
       +'</div>'
+      +'<span class="trash-icon" style="flex-shrink:0;color:var(--accent);margin-right:10px;" onclick="editPromoAsset(\''+id+'\')">수정</span>'
       +'<span class="trash-icon" style="flex-shrink:0;" onclick="deletePromoAsset(\''+id+'\')">삭제</span></div>';
   }).join('');
 }
