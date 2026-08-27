@@ -6435,20 +6435,22 @@ function nearestNeighborOrder(base, points){
   }
   return order;
 }
+// toISOString()은 UTC 기준이라, 한국시간(UTC+9)에서 자정 근처에 날짜가 하루 밀리는 버그가 있었음(2026-08 확인). 로컬 날짜 그대로 문자열화.
+function localDateStr(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
 function getRouteDateRange(period){
-  var today = new Date(); today.setHours(0,0,0,0);
-  var todayStr = today.toISOString().slice(0,10);
+  var today = new Date();
+  var todayStr = localDateStr(today);
   if(period==='today') return {start:todayStr, end:todayStr};
   if(period==='week'){
     var day = today.getDay();
     var monday = new Date(today); monday.setDate(today.getDate() - ((day+6)%7));
     var sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
-    return {start:monday.toISOString().slice(0,10), end:sunday.toISOString().slice(0,10)};
+    return {start:localDateStr(monday), end:localDateStr(sunday)};
   }
   if(period==='month'){
     var first = new Date(today.getFullYear(), today.getMonth(), 1);
     var last = new Date(today.getFullYear(), today.getMonth()+1, 0);
-    return {start:first.toISOString().slice(0,10), end:last.toISOString().slice(0,10)};
+    return {start:localDateStr(first), end:localDateStr(last)};
   }
   return {start:null, end:null};
 }
@@ -6457,12 +6459,17 @@ var _routeExcluded = {};   // "date|empId" -> true (목록에서 제외 체크�
 function getRouteScheduleGroups(period){
   var range = getRouteDateRange(period);
   var groups = {};
+  var missingCoord = []; // 좌표가 없어서 동선에서 빠진 사람들 (조용히 누락되지 않도록 별도로 추적)
   Object.keys(schedules).forEach(function(id){
     var s = schedules[id];
     if(!s.empId || !s.date) return;
-    var p = people[s.empId];
-    if(!p || !p.officeLat || !p.officeLng) return;
     if(range.start && (s.date<range.start || s.date>range.end)) return;
+    var p = people[s.empId];
+    if(!p) return;
+    if(!p.officeLat || !p.officeLng){
+      missingCoord.push({date:s.date, name:p.name, empId:s.empId});
+      return;
+    }
     if(!groups[s.date]) groups[s.date]=[];
     if(groups[s.date].indexOf(s.empId)===-1) groups[s.date].push(s.empId);
   });
@@ -6471,18 +6478,25 @@ function getRouteScheduleGroups(period){
     if(!groups[d]) groups[d]=[];
     _routeExtraStops[d].forEach(function(empId){ if(groups[d].indexOf(empId)===-1) groups[d].push(empId); });
   });
-  return groups;
+  return { groups: groups, missingCoord: missingCoord };
 }
 function refreshRouteStopsList(){
   var periodEl = document.getElementById('route-period-select');
   var period = periodEl ? periodEl.value : 'today';
-  var groups = getRouteScheduleGroups(period);
+  var result = getRouteScheduleGroups(period);
+  var groups = result.groups;
   var dates = Object.keys(groups).sort();
   var el = document.getElementById('route-stops-list');
   if(!el) return;
-  if(!dates.length){ el.innerHTML = '<div class="empty" style="font-size:12px;">이 기간에 대상자 지정된 일정이 없어요. 지도에서 마커를 클릭해 추가하시거나 다른 기간을 선택해주세요.</div>'; return; }
-  var todayStr = new Date().toISOString().slice(0,10);
-  el.innerHTML = dates.map(function(d){
+  var warnHtml = '';
+  if(result.missingCoord.length){
+    warnHtml = '<div style="font-size:11.5px;color:#8a5a00;background:#fff6e5;border-radius:8px;padding:8px 10px;margin-bottom:8px;">⚠ 일정은 있지만 <b>사무실 주소 좌표가 없어서</b> 동선에서 빠진 사람: '
+      + result.missingCoord.map(function(m){ return m.name+'('+fmtDate8(m.date)+')'; }).join(', ')
+      + ' — 지도 탭 상단 "📍 좌표 일괄 갱신" 눌러서 해결할 수 있어요.</div>';
+  }
+  if(!dates.length){ el.innerHTML = warnHtml + '<div class="empty" style="font-size:12px;">이 기간에 대상자 지정된 일정이 없어요. 지도에서 마커를 클릭해 추가하시거나 다른 기간을 선택해주세요.</div>'; return; }
+  var todayStr = localDateStr(new Date());
+  el.innerHTML = warnHtml + dates.map(function(d){
     var isPast = d < todayStr;
     var rows = groups[d].map(function(empId){
       var p = people[empId];
@@ -6510,7 +6524,7 @@ function toggleRoutePickMode(){
   showToast(_routePickMode ? '지도에서 마커를 클릭하면 오늘 동선에 추가돼요. 다시 누르면 꺼져요.' : '추가 모드를 껐어요.');
 }
 function addExtraRouteStop(empId){
-  var todayStr = new Date().toISOString().slice(0,10);
+  var todayStr = localDateStr(new Date());
   if(!_routeExtraStops[todayStr]) _routeExtraStops[todayStr]=[];
   if(_routeExtraStops[todayStr].indexOf(empId)===-1){
     _routeExtraStops[todayStr].push(empId);
@@ -6552,7 +6566,7 @@ function drawAllDayRoutes(){
   var statusEl = document.getElementById('route-status');
   var periodEl = document.getElementById('route-period-select');
   var period = periodEl ? periodEl.value : 'today';
-  var groups = getRouteScheduleGroups(period);
+  var groups = getRouteScheduleGroups(period).groups;
   var dates = Object.keys(groups).filter(function(d){
     return groups[d].some(function(empId){ return !_routeExcluded[d+'|'+empId]; });
   }).sort();
@@ -6561,7 +6575,7 @@ function drawAllDayRoutes(){
   getBasePosition(function(base){
     if(!base){ if(statusEl) statusEl.textContent = '⚠ 기점 주소(아이파크타워) 좌표를 찾을 수 없어요.'; return; }
     var totalPastKm = 0, totalFutureKm = 0;
-    var todayStr = new Date().toISOString().slice(0,10);
+    var todayStr = localDateStr(new Date());
     dates.forEach(function(d){
       var empIds = groups[d].filter(function(empId){ return !_routeExcluded[d+'|'+empId]; });
       if(!empIds.length) return;
