@@ -1860,6 +1860,13 @@ function applyCampaignPick(prefix){
   var meta = campaignMeta[tag];
   tagEl.value = tag;
   titleEl.value = meta ? meta.title : tag;
+  var textEl = document.getElementById(prefix+'-text');
+  if(textEl && meta && meta.lastMessage){
+    textEl.value = meta.lastMessage;
+    showToast('이전에 이 캠페인으로 보냈던 문자 내용을 불러왔어요. 필요하면 수정 후 보내주세요.');
+  } else if(textEl && meta && !meta.lastMessage){
+    showToast('이 캠페인은 저장된 문자 내용이 없어요(서베이·편지 링크처럼 사람마다 내용이 달랐던 캠페인일 수 있어요). 새로 작성해주세요.');
+  }
 }
 function campaignTagSummary(tag){
   var dates = []; var empIds = {};
@@ -3227,7 +3234,7 @@ function sendMgrReachViaSolapi(){
   if(!text){ showToast('메시지를 입력해주세요.'); return; }
   var items = checked.map(function(m, i){ return { id:'mgr'+i+'_'+m.phone, name:m.name, phone:m.phone, text:text }; });
   document.querySelector('.modal-overlay').remove();
-  openSendReviewModal(items, campaignTag, 'sms', campaignTitle);
+  openSendReviewModal(items, campaignTag, 'sms', campaignTitle, null, null, text);
 }
 // 조직도 탭 "🚀 Reach" 버튼: 지금 걸린 본부/지점 필터를 감지해서, 라벨과 캠페인 태그/제목을 조직명 기반으로 자동 준비
 function openOrgReachModal(){
@@ -3554,7 +3561,7 @@ async function sendSolapiMessages(messages){
   return { ok: res.ok, data: data, failedNumbers: failedNumbers, count: count };
 }
 /* ---------- 카드형 발송 진행 모달 (청소앱과 동일한 UX) ---------- */
-function openSendReviewModal(items, campaignTag, type, title, orgHq, orgBranch){
+function openSendReviewModal(items, campaignTag, type, title, orgHq, orgBranch, lastMessage){
   type = type || 'sms';
   // items: [{id, name, phone, text}]
   var overlay=document.createElement('div');
@@ -3623,7 +3630,7 @@ function openSendReviewModal(items, campaignTag, type, title, orgHq, orgBranch){
         showToast('전송완료: '+successCount+'건');
         if(campaignTag && successCount>0 && (title || orgHq)){
           var metaKey = sanitizeFbKey(campaignTag);
-          campaignMeta[campaignTag] = { tag: campaignTag, title: title||campaignTag, createdAt: new Date().toISOString(), orgHq: orgHq||null, orgBranch: orgBranch||null };
+          campaignMeta[campaignTag] = { tag: campaignTag, title: title||campaignTag, createdAt: new Date().toISOString(), orgHq: orgHq||null, orgBranch: orgBranch||null, lastMessage: lastMessage||null };
           fetch(FB_URL+ROOT+'/campaignMeta/'+metaKey+'.json', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(campaignMeta[campaignTag])});
         }
       } else {
@@ -3658,7 +3665,7 @@ async function sendGroupSmsViaSolapi(){
   }).filter(function(it){ return it.phone; });
   if(!items.length){ showToast('전화번호가 있는 대상자가 없어요.'); return; }
   document.querySelector('.modal-overlay').remove();
-  openSendReviewModal(items, campaignTag, 'sms', campaignTitle, _gsmsOrgHq, _gsmsOrgBranch);
+  openSendReviewModal(items, campaignTag, 'sms', campaignTitle, _gsmsOrgHq, _gsmsOrgBranch, text);
 }
 async function sendGroupSurveyLinksViaSolapi(){
   var rawIds = getGsmsTargetIds();
