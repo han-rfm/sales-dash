@@ -581,6 +581,26 @@ tr.row-clickable:hover{background:var(--sf2);}
       </div>
 
       <div class="card">
+        <div class="card-title">📸 프로모션 자료함</div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:10px;">본부/지점별 프로모션 사진(구글드라이브·네이버밴드드라이브 등 공유링크)이나 문구를 등록해두면, 조직도 탭에서 Reach 보낼 때 "📎 프로모션 자료 첨부"로 골라서 문자에 자동으로 끼워넣을 수 있어요.</p>
+        <div class="grid-2" style="margin-bottom:8px;">
+          <select id="promo-hq"></select>
+          <select id="promo-branch"></select>
+        </div>
+        <div class="grid-2" style="margin-bottom:8px;">
+          <select id="promo-type">
+            <option value="photo">사진 (공유링크)</option>
+            <option value="text">텍스트</option>
+          </select>
+          <input type="text" id="promo-title" placeholder="제목 (예: 8월 이벤트 포스터)">
+        </div>
+        <textarea id="promo-content" rows="2" placeholder="사진이면 공유링크 URL, 텍스트면 내용 그대로 입력" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:9px 12px;color:var(--text);font-family:inherit;font-size:13px;margin-bottom:8px;"></textarea>
+        <button class="btn primary" onclick="addPromoAsset()">자료 추가</button>
+        <div id="promo-stats-rows" style="margin-top:14px;"></div>
+        <div id="promo-asset-rows" style="margin-top:8px;"></div>
+      </div>
+
+      <div class="card">
         <div class="card-title">📊 활동 저조 기준 설정</div>
         <p style="font-size:12px;color:var(--muted);margin-bottom:10px;">대시보드 "상시 체크 루틴" 카드에서 이 기준 미만이면 "저조자"로 잡아요.</p>
         <div style="display:flex;gap:16px;flex-wrap:wrap;">
@@ -716,9 +736,9 @@ var hqStaff = {};     // staffId -> {dept, name, phone}
 var fmMap = {};        // FM이름 -> {phone}
 var tipLinks = {};     // linkId -> {title, url, createdAt}
 var DEFAULT_MESSAGE_TEMPLATES = {
-  surveyLink: '{name}님, eFSR 프로파일링을 위한 짧은 서베이입니다. 아래 링크에서 편하실 때 작성해주세요.\n{url}',
-  tipNotice: '안녕하세요, 이번 교육영상 공유드립니다.\n\n[{title}]\n{url}\n\n편하실 때 시청 부탁드려요 :)',
-  letterLink: '{name} eFSR님, 마음의 선물을 잘 받으셨나요?\n소속 지점에 아래 폼링크로\n감사의 한마디 남겨주시겠어요?\n항상 응원합니다!\n{url}'
+  surveyLink: '{name}님, eFSR 프로파일링을 위한 짧은 서베이입니다. 아래 링크에서 편하실 때 작성해주세요.\n\n{url}',
+  tipNotice: '안녕하세요, 이번 교육영상 공유드립니다.\n\n[{title}]\n\n{url}\n\n편하실 때 시청 부탁드려요 :)',
+  letterLink: '{name} eFSR님, 마음의 선물을 잘 받으셨나요?\n소속 지점에 아래 폼링크로\n감사의 한마디 남겨주시겠어요?\n항상 응원합니다!\n\n{url}'
 };
 // 서베이 척도(5점, 낮을수록 챙겨야 할 신호) 기반 "이달의 추천 액션" 기본 라벨/기준값 — 이름은 설정에서 자유롭게 수정 가능
 var DEFAULT_INTERVENTION_CONFIG = {
@@ -743,6 +763,7 @@ var surveyResponses = {};    // empId -> { responseId: { submittedAt, sections:[
 var surveyReopened = {};     // empId -> true : 정훈님이 '재참여 허용' 누른 사람. 서베이 제출 완료되면 자동 잠김(플래그 삭제)
 var campaignMeta = {};       // campaignTag -> {tag, title, createdAt} : 단체 Reach 보낼 때 적은 제목/목적
 var rollingLetters = {};     // empId -> {empId, name, hq, branch, message, submittedAt} : 방문완료 eFSR이 남긴 지점 편지
+var promoAssets = {};        // assetId -> {hq, branch, type:'photo'|'text', title, content, createdAt} : 조직별 프로모션 자료(사진링크/텍스트)
 function sanitizeFbKey(s){ return String(s).replace(/[.#$/\[\]]/g, '_'); }
 
 // 5점 리커트 척도 공통 옵션 (scale 타입 필드는 항상 이 5개 사용)
@@ -970,7 +991,8 @@ function boot(){
     fetch(FB_URL+ROOT+'/surveyScoreSnapshots.json').then(function(r){return r.json();}),
     fetch(FB_URL+ROOT+'/surveyReopened.json').then(function(r){return r.json();}),
     fetch(FB_URL+ROOT+'/campaignMeta.json').then(function(r){return r.json();}),
-    fetch(FB_URL+ROOT+'/rollingLetters.json').then(function(r){return r.json();})
+    fetch(FB_URL+ROOT+'/rollingLetters.json').then(function(r){return r.json();}),
+    fetch(FB_URL+ROOT+'/promoAssets.json').then(function(r){return r.json();})
   ]).then(function(res){
     people = res[0]||{};
     snapshots = res[1]||{};
@@ -997,6 +1019,7 @@ function boot(){
     campaignMeta = {};
     Object.values(campaignMetaRaw).forEach(function(m){ if(m && m.tag) campaignMeta[m.tag] = m; });
     rollingLetters = res[15]||{};
+    promoAssets = res[16]||{};
     if(res[8]){
       surveyTemplate = res[8];
       // 라벨·기준값은 절대 건드리지 않고, 필드id가 일치하는데 S/W 태그가 비어있는 곳만 조용히 채워넣음
@@ -1026,6 +1049,7 @@ function renderAll(){
   renderConfigSettings();
   renderSurveySettings();
   renderTipLinksSettings();
+  renderPromoAssetSettings();
   renderUploadHistory();
 }
 
@@ -3128,6 +3152,7 @@ function openMgrReachModal(){
       +'<button class="btn" style="flex:1;" onclick="copyMgrReachNumbers()">번호만 복사</button>'
       +'<button class="btn" style="flex:1;" onclick="copyMgrReachFull()">번호+내용 복사</button>'
     +'</div>'
+    +'<button class="btn" style="width:100%;margin-top:8px;color:var(--accent);border-color:var(--accent);" onclick="sendTestToMe(\'mgr\')">🧪 나에게 먼저 테스트 보내기</button>'
     +'<button class="btn primary" style="width:100%;margin-top:8px;" onclick="sendMgrReachViaSolapi()">🚀 지금 바로 발송 (Solapi)</button>';
   overlay.appendChild(box);
   document.body.appendChild(overlay);
@@ -3244,6 +3269,8 @@ function openGroupSmsModal(presetIds, presetLabel, presetMessage, orgHq, orgBran
     +'<input type="text" id="gsms-campaign-title" placeholder="예: 8월 미제출자 리마인드" value="'+(_gsmsOrgHq?suggestOrgCampaignTitle(_gsmsOrgHq,_gsmsOrgBranch,(_gsmsPresetIds?_gsmsPresetIds.length:0)):'')+'" oninput="syncCampaignTagFromTitle(\'gsms\')" style="margin-bottom:10px;font-size:12.5px;">'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">캠페인 태그 <span style="color:var(--dim);">(제목에서 자동 생성됨 · 이 태그로 나중에 효과 비교·캠페인 목록이 묶여요, 필요하면 직접 수정 가능)</span></label>'
     +'<input type="text" id="gsms-campaign-tag" value="'+(_gsmsOrgHq?suggestOrgCampaignTag(_gsmsOrgHq,_gsmsOrgBranch):suggestCampaignTag(presetLabel))+'" style="margin-bottom:10px;font-size:12.5px;">'
+    +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">📎 프로모션 자료 첨부 <span style="color:var(--dim);">(선택하면 메시지에 제목+링크가 자동으로 끼워져요)</span></label>'
+    +'<select id="gsms-promo-picker" onchange="applyPromoAssetToGsms()" style="margin-bottom:10px;font-size:12.5px;">'+buildPromoAssetOptions(_gsmsOrgHq,_gsmsOrgBranch)+'</select>'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">메시지</label>'
     +'<textarea id="gsms-text" rows="4" placeholder="보낼 문자 내용을 입력하세요">'+(presetMessage||'')+'</textarea>'
     +'<div style="display:flex;gap:6px;margin-top:10px;">'
@@ -3251,6 +3278,7 @@ function openGroupSmsModal(presetIds, presetLabel, presetMessage, orgHq, orgBran
       +'<button class="btn" style="flex:1;" onclick="copyGsmsFull()">번호+내용 복사</button>'
     +'</div>'
     +'<button class="btn" style="width:100%;margin-top:8px;" onclick="openGsmsSmsApp()">문자 앱 열기 (50명 이하 권장)</button>'
+    +'<button class="btn" style="width:100%;margin-top:8px;color:var(--accent);border-color:var(--accent);" onclick="sendTestToMe(\'gsms\')">🧪 나에게 먼저 테스트 보내기</button>'
     +'<button class="btn primary" style="width:100%;margin-top:8px;" onclick="sendGroupSmsViaSolapi()">🚀 지금 바로 발송 (Solapi)</button>'
     + (_gsmsPresetIds ? '' : '<button class="btn" style="width:100%;margin-top:8px;" onclick="sendGroupSurveyLinksViaSolapi()">📋 eFSR 서베이 링크 단체발송</button>')
     +'<div id="gsms-send-status" style="font-size:11px;color:var(--muted);margin-top:6px;"></div>';
@@ -3510,9 +3538,19 @@ function openSendReviewModal(items, campaignTag, type, title, orgHq, orgBranch){
         }).join('')
     +'</div>'
     +'<div id="send-review-status" style="font-size:12.5px;color:var(--muted);margin-bottom:10px;"></div>'
+    +'<button id="send-review-test-btn" class="btn" style="width:100%;margin-bottom:8px;color:var(--accent);border-color:var(--accent);">🧪 나에게 먼저 테스트 보내기</button>'
     +'<button id="send-review-btn" class="btn primary" style="width:100%;">🚀 발송하기</button>';
   overlay.appendChild(box);
   document.body.appendChild(overlay);
+  document.getElementById('send-review-test-btn').onclick = async function(){
+    var btn = this;
+    btn.disabled = true; btn.textContent = '테스트 전송중..';
+    try{
+      var result = await sendSolapiMessages([{ to:SOLAPI_FROM, from:SOLAPI_FROM, text:'(테스트) '+previewText }]);
+      showToast(result.ok ? '🧪 나에게 테스트 문자 보냈어요. 확인해보세요!' : '테스트 전송 실패');
+    }catch(e){ showToast('테스트 전송 실패: '+e); }
+    btn.disabled = false; btn.textContent = '🧪 나에게 먼저 테스트 보내기';
+  };
   document.getElementById('send-review-btn').onclick = async function(){
     var btn = document.getElementById('send-review-btn');
     var statusEl = document.getElementById('send-review-status');
@@ -4376,6 +4414,15 @@ function sendSurveyLink(empId){
   sendSingleSms(empId, p.phone, text, 'survey_link');
 }
 // 실제 담당자 데이터를 건드리지 않는 테스트 전용 링크(id=test)를 정훈님 번호로 발송
+// Reach/MGR Reach 작성화면에서 "나에게 먼저 테스트 보내기" — 지금 작성중인 메시지 그대로 내 번호로만 발송검토 화면을 띄움
+function sendTestToMe(prefix){
+  var textEl = document.getElementById(prefix+'-text');
+  if(!textEl){ showToast('메시지 입력란을 찾을 수 없어요.'); return; }
+  var msg = textEl.value.trim();
+  if(!msg){ showToast('먼저 메시지를 입력해주세요.'); return; }
+  var text = '(테스트) '+msg;
+  openSendReviewModal([{ id:'testself'+Date.now(), name:'나(테스트)', phone:SOLAPI_FROM, text:text }]);
+}
 function sendTestSurveyToMe(){
   var url = SURVEY_BASE_URL + 'survey.html?id=test';
   var text = fillTemplate(appConfig.messageTemplates.surveyLink, {name:'테스트', url:url})
@@ -5971,6 +6018,107 @@ function saveConfig(){
   renderDashboard();
 }
 
+// Reach 메시지 작성화면의 "프로모션 자료 첨부" 드롭다운 옵션 생성 (조직 컨텍스트 있으면 그 조직+전체공통만, 없으면 전부)
+function buildPromoAssetOptions(hq, branch){
+  var ids = Object.keys(promoAssets).filter(function(id){
+    var a = promoAssets[id];
+    if(!hq) return true;
+    if(!a.hq) return true; // 전체공통 자료는 항상 후보
+    if(a.hq!==hq) return false;
+    if(a.branch && a.branch!==branch) return false;
+    return true;
+  }).sort(function(a,b){ return (promoAssets[b].createdAt||'').localeCompare(promoAssets[a].createdAt||''); });
+  var opts = '<option value="">자료 선택 안 함</option>';
+  opts += ids.map(function(id){
+    var a = promoAssets[id];
+    var orgLabel = a.hq ? (a.hq+(a.branch?'/'+a.branch:'')) : '공통';
+    var label = ((a.type==='photo')?'🖼':'📝')+' '+a.title+' ('+orgLabel+')';
+    return '<option value="'+id+'">'+label.replace(/</g,'&lt;')+'</option>';
+  }).join('');
+  return opts;
+}
+function applyPromoAssetToGsms(){
+  var sel = document.getElementById('gsms-promo-picker');
+  var textEl = document.getElementById('gsms-text');
+  if(!sel || !textEl || !sel.value) return;
+  var a = promoAssets[sel.value];
+  if(!a) return;
+  var insertText = a.title+'\n\n'+a.content+'\n';
+  textEl.value = textEl.value.trim() ? (textEl.value+'\n\n'+insertText) : insertText;
+}
+/* ---------- 프로모션 자료함 (본부/지점별 사진링크·텍스트) ---------- */
+function initPromoAssetSelects(){
+  var hqs = [...new Set(Object.values(people).map(function(p){return p.hq;}).filter(Boolean))].sort();
+  var branches = [...new Set(Object.values(people).map(function(p){return p.branch;}).filter(Boolean))].sort();
+  var hqEl = document.getElementById('promo-hq');
+  var brEl = document.getElementById('promo-branch');
+  if(hqEl) hqEl.innerHTML = '<option value="">본부 (전체 공통이면 비워두세요)</option>' + hqs.map(function(h){return '<option>'+h+'</option>';}).join('');
+  if(brEl) brEl.innerHTML = '<option value="">지점 (본부 전체면 비워두세요)</option>' + branches.map(function(b){return '<option>'+b+'</option>';}).join('');
+}
+function addPromoAsset(){
+  var hq = document.getElementById('promo-hq').value;
+  var branch = document.getElementById('promo-branch').value;
+  var type = document.getElementById('promo-type').value;
+  var title = document.getElementById('promo-title').value.trim();
+  var content = document.getElementById('promo-content').value.trim();
+  if(!title || !content){ showToast('제목과 내용(링크)을 모두 입력해주세요.'); return; }
+  var id = 'promo'+Date.now();
+  var entry = { hq:hq||null, branch:branch||null, type:type, title:title, content:content, createdAt:new Date().toISOString() };
+  fetch(FB_URL+ROOT+'/promoAssets/'+id+'.json',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(entry)});
+  promoAssets[id] = entry;
+  document.getElementById('promo-title').value='';
+  document.getElementById('promo-content').value='';
+  renderPromoAssetSettings();
+  showToast('프로모션 자료가 추가됐어요.');
+}
+function deletePromoAsset(id){
+  if(!confirm('이 프로모션 자료를 삭제할까요?')) return;
+  fetch(FB_URL+ROOT+'/promoAssets/'+id+'.json',{method:'DELETE'});
+  delete promoAssets[id];
+  renderPromoAssetSettings();
+}
+function renderPromoAssetSettings(){
+  initPromoAssetSelects();
+  var statsEl = document.getElementById('promo-stats-rows');
+  var listEl = document.getElementById('promo-asset-rows');
+  if(!listEl) return;
+  var ids = Object.keys(promoAssets).sort(function(a,b){ return (promoAssets[b].createdAt||'').localeCompare(promoAssets[a].createdAt||''); });
+  // 조직별 카운팅 (이번 달 기준)
+  if(statsEl){
+    var thisMonthPrefix = new Date().toISOString().slice(0,7);
+    var byOrg = {};
+    ids.forEach(function(id){
+      var a = promoAssets[id];
+      if(!a.hq) return; // 전체공통은 조직별 집계에서 제외
+      var key = a.hq + (a.branch?'/'+a.branch:'');
+      if(!byOrg[key]) byOrg[key] = {total:0, thisMonth:0};
+      byOrg[key].total++;
+      if((a.createdAt||'').slice(0,7)===thisMonthPrefix) byOrg[key].thisMonth++;
+    });
+    var orgKeys = Object.keys(byOrg).sort(function(a,b){ return byOrg[b].total-byOrg[a].total; });
+    statsEl.innerHTML = orgKeys.length ? ('<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">조직별 등록 현황</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:12px;">'
+      +'<tr style="border-bottom:1px solid var(--bd);color:var(--muted);font-size:10.5px;"><th style="text-align:left;padding:4px;">조직</th><th style="text-align:right;padding:4px;">이번 달</th><th style="text-align:right;padding:4px;">누적</th></tr>'
+      + orgKeys.map(function(k){
+          return '<tr style="border-bottom:1px solid var(--bd);"><td style="padding:5px 4px;font-weight:600;">'+k+'</td><td style="padding:5px 4px;text-align:right;color:var(--accent);font-weight:700;">'+byOrg[k].thisMonth+'건</td><td style="padding:5px 4px;text-align:right;color:var(--muted);">'+byOrg[k].total+'건</td></tr>';
+        }).join('')
+      +'</table>') : '';
+  }
+  if(!ids.length){ listEl.innerHTML='<div class="empty">등록된 자료가 없어요.</div>'; return; }
+  listEl.innerHTML = ids.map(function(id){
+    var a = promoAssets[id];
+    var orgLabel = a.hq ? (a.hq+(a.branch?'/'+a.branch:'')) : '전체 공통';
+    var contentPreview = a.type==='photo'
+      ? '<a href="'+a.content+'" target="_blank" style="font-size:11px;color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;">'+a.content+'</a>'
+      : '<div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+a.content+'</div>';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--bd);gap:8px;">'
+      +'<div style="min-width:0;overflow:hidden;flex:1;">'
+        +'<div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(a.type==='photo'?'🖼':'📝')+' '+a.title+' <span style="font-size:10px;color:var(--muted);">('+orgLabel+')</span></div>'
+        + contentPreview
+      +'</div>'
+      +'<span class="trash-icon" style="flex-shrink:0;" onclick="deletePromoAsset(\''+id+'\')">삭제</span></div>';
+  }).join('');
+}
 /* ---------- TIP 교육영상 링크 관리 ---------- */
 function addTipLink(){
   var title = document.getElementById('tip-title').value.trim();
