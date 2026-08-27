@@ -4227,6 +4227,8 @@ function openQuickScheduleModal(empId){
   var box=document.createElement('div');
   box.className='modal-box'; box.style.position='relative'; box.style.maxWidth='400px';
   var today = new Date().toISOString().slice(0,10);
+  // 프로필에 저장된 사무실 주소가 있으면 우선 사용, 없으면 서베이 응답에서 실시간으로 가져와 기본값으로 채움 (자유롭게 수정 가능)
+  var prefillLocation = p.officeAddress || getSurveyOfficeAddrFor(empId) || '';
   box.innerHTML = '<button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button>'
     +'<div class="card-title">📅 '+p.name+'님과 약속 잡기</div>'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">시작일</label>'
@@ -4239,8 +4241,8 @@ function openQuickScheduleModal(empId){
     +'<input type="date" id="sched-end-date" min="'+today+'" onchange="toggleRangeVsRecur()">'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">종료시간 (선택)</label>'
     +buildTimeSelectHtml('sched-end-time')
-    +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">장소 / 웹미팅 링크</label>'
-    +'<input type="text" id="qs-location" placeholder="예: 강남 사무실, 또는 https://zoom.us/...">'
+    +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">장소 / 웹미팅 링크 <span style="color:var(--dim);">'+(prefillLocation?'(서베이·프로필 주소로 자동입력됨, 자유롭게 수정 가능)':'')+'</span></label>'
+    +'<input type="text" id="qs-location" value="'+prefillLocation.replace(/"/g,'&quot;')+'" placeholder="예: 강남 사무실, 또는 https://zoom.us/...">'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">반복</label>'
     +'<select id="sched-recur-type" onchange="toggleRecurFields();toggleRangeVsRecur();">'
       +'<option value="none">반복 안 함</option>'
