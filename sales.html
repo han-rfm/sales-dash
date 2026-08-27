@@ -4277,7 +4277,7 @@ function saveRfmInsight(empId){
     setTimeout(function(){ if(statusEl) statusEl.textContent=''; }, 1500);
   }
 }
-function openQuickScheduleModal(empId){
+function openQuickScheduleModal(empId, presetDate){
   var p = people[empId];
   if(!p) return;
   var overlay=document.createElement('div');
@@ -4285,7 +4285,7 @@ function openQuickScheduleModal(empId){
   overlay.onclick=function(e){ if(e.target===overlay) overlay.remove(); };
   var box=document.createElement('div');
   box.className='modal-box'; box.style.position='relative'; box.style.maxWidth='400px';
-  var today = new Date().toISOString().slice(0,10);
+  var today = presetDate || localDateStr(new Date());
   // 프로필에 저장된 사무실 주소가 있으면 우선 사용, 없으면 서베이 응답에서 실시간으로 가져와 기본값으로 채움 (자유롭게 수정 가능)
   var prefillLocation = p.officeAddress || getSurveyOfficeAddrFor(empId) || '';
   box.innerHTML = '<button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button>'
@@ -4353,6 +4353,9 @@ function saveQuickSchedule(empId){
   renderCalendar();
   renderDashboard();
   showToast(entry.endDate ? (date+' ~ '+entry.endDate+' 일정이 추가됐어요.') : '일정이 캘린더('+date+')에 추가됐어요.');
+  // 동선 목록·그래프를 항상 최신화 (지도 탭이 지금 안 보여도 내부에서 null 체크하니 안전)
+  refreshRouteStopsList();
+  if(_routeLines && _routeLines.length) drawAllDayRoutes();
 }
 // 이미 제출 완료된 사람에게 '한 번 더 제출 가능' 상태를 열어줌 (예전 응답은 삭제 안 하고 그대로 보존)
 // 링크를 못 받았거나, 내용을 다시 쓰고 싶다는 요청이 있을 때 사용. 제출 완료되면 플래그는 자동으로 다시 잠김.
@@ -5355,6 +5358,8 @@ function saveSchedule(dateStr){
   renderCalendar();
   renderDashboard();
   showToast(wasEditing ? '일정이 수정됐어요.' : (entry.endDate ? (anchorDate+' ~ '+entry.endDate+' 일정이 추가됐어요.') : '일정이 추가됐어요.'));
+  refreshRouteStopsList();
+  if(_routeLines && _routeLines.length) drawAllDayRoutes();
 }
 function editSchedule(id, dateStr){
   var s = schedules[id];
@@ -6397,14 +6402,23 @@ function renderMap(){
       var p = people[id];
       var pos = new kakao.maps.LatLng(p.officeLat, p.officeLng);
       var col = colorMap[p.hq] || '#888';
+      var isVisited = p.chk1 && p.chk2;
       var content = document.createElement('div');
       content.style.cursor='pointer';
-      content.innerHTML = '<div style="width:16px;height:16px;border-radius:50%;background:'+col+';border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.35);"></div>';
+      content.innerHTML = isVisited
+        ? '<div style="width:20px;height:20px;background:'+col+';border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);clip-path:polygon(50% 0%,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);"></div>'
+        : '<div style="width:16px;height:16px;border-radius:50%;background:'+col+';border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.35);"></div>';
       var overlay = new kakao.maps.CustomOverlay({ position:pos, content:content, yAnchor:0.5, xAnchor:0.5 });
       overlay.setMap(_mapInstance);
       content.addEventListener('click', function(){
-        if(_routePickMode){ addExtraRouteStop(id); }
-        else { openProfile(id); }
+        if(_routePickMode){
+          var periodEl = document.getElementById('route-period-select');
+          var range = getRouteDateRange(periodEl ? periodEl.value : 'today');
+          var presetDate = (range.start && range.start===range.end) ? range.start : null;
+          openQuickScheduleModal(id, presetDate);
+        } else {
+          openProfile(id);
+        }
       });
       _mapMarkers.push(overlay);
       bounds.extend(pos);
@@ -6474,7 +6488,6 @@ function getRouteDateRange(period){
   }
   return {start:null, end:null};
 }
-var _routeExtraStops = {}; // dateStr -> [empId,...] (지도클릭으로 임시 추가된 정거장)
 var _routeExcluded = {};   // "date|empId" -> true (목록에서 제외 체크한 것)
 function getRouteScheduleGroups(period){
   var range = getRouteDateRange(period);
@@ -6493,11 +6506,6 @@ function getRouteScheduleGroups(period){
     if(!groups[s.date]) groups[s.date]=[];
     if(groups[s.date].indexOf(s.empId)===-1) groups[s.date].push(s.empId);
   });
-  Object.keys(_routeExtraStops).forEach(function(d){
-    if(range.start && (d<range.start || d>range.end)) return;
-    if(!groups[d]) groups[d]=[];
-    _routeExtraStops[d].forEach(function(empId){ if(groups[d].indexOf(empId)===-1) groups[d].push(empId); });
-  });
   return { groups: groups, missingCoord: missingCoord };
 }
 function onRoutePeriodChange(){
@@ -6509,6 +6517,10 @@ function onRoutePeriodChange(){
     if(showCustom && !dateEl.value) dateEl.value = localDateStr(new Date());
   }
   refreshRouteStopsList();
+}
+function findScheduleTime(dateStr, empId){
+  var found = Object.values(schedules).find(function(s){ return s.date===dateStr && s.empId===empId; });
+  return found ? found.time : null;
 }
 function refreshRouteStopsList(){
   var periodEl = document.getElementById('route-period-select');
@@ -6528,13 +6540,17 @@ function refreshRouteStopsList(){
   var todayStr = localDateStr(new Date());
   el.innerHTML = warnHtml + dates.map(function(d){
     var isPast = d < todayStr;
-    var rows = groups[d].map(function(empId){
+    var withTime = groups[d].map(function(empId){ return { empId:empId, time: findScheduleTime(d, empId) }; })
+      .sort(function(a,b){ return (a.time||'99:99').localeCompare(b.time||'99:99'); });
+    var rows = withTime.map(function(item){
+      var empId = item.empId;
       var p = people[empId];
       var key = d+'|'+empId;
       var checked = !_routeExcluded[key];
       return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:3px 0;">'
         +'<input type="checkbox" '+(checked?'checked':'')+' onchange="toggleRouteStopExclude(\''+key+'\',this.checked)" style="width:auto;">'
-        + (p?p.name:empId) + ' <span style="color:var(--muted);font-size:10.5px;">'+(p?((p.hq||'')+'·'+(p.branch||'')):'')+'</span>'
+        +(item.time?'<span style="color:var(--accent);font-weight:700;font-size:11px;">'+item.time+'</span>':'')
+        +' ' + (p?p.name:empId) + ' <span style="color:var(--muted);font-size:10.5px;">'+(p?((p.hq||'')+'·'+(p.branch||'')):'')+'</span>'
       +'</label>';
     }).join('');
     return '<div style="margin-bottom:8px;padding:8px;background:var(--sf2);border-radius:8px;">'
@@ -6551,18 +6567,7 @@ function toggleRoutePickMode(){
   _routePickMode = !_routePickMode;
   var btn = document.getElementById('route-pick-mode-btn');
   if(btn) btn.classList.toggle('primary', _routePickMode);
-  showToast(_routePickMode ? '지도에서 마커를 클릭하면 오늘 동선에 추가돼요. 다시 누르면 꺼져요.' : '추가 모드를 껐어요.');
-}
-function addExtraRouteStop(empId){
-  var todayStr = localDateStr(new Date());
-  if(!_routeExtraStops[todayStr]) _routeExtraStops[todayStr]=[];
-  if(_routeExtraStops[todayStr].indexOf(empId)===-1){
-    _routeExtraStops[todayStr].push(empId);
-    showToast((people[empId]?people[empId].name:empId)+'님을 오늘 동선에 추가했어요.');
-    refreshRouteStopsList();
-  } else {
-    showToast('이미 추가된 정거장이에요.');
-  }
+  showToast(_routePickMode ? '지도에서 마커를 클릭하면 그 사람과 약속잡기 화면이 바로 열려요. 저장하면 캘린더+동선에 자동 반영돼요.' : '추가 모드를 껐어요.');
 }
 async function fetchKakaoRouteLeg(origin, destination){
   var key = appConfig.kakaoMobilityKey;
@@ -6614,6 +6619,15 @@ function drawAllDayRoutes(){
       var routePoints = [base].concat(ordered).concat([base]);
       var isPast = d < todayStr;
       var color = isPast ? '#0f9d67' : '#4361ee';
+      ordered.forEach(function(pt, idx){
+        var numContent = document.createElement('div');
+        numContent.innerHTML = '<div style="width:22px;height:22px;border-radius:50%;background:'+color+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);">'+(idx+1)+'</div>';
+        var numOverlay = new kakao.maps.CustomOverlay({
+          position: new kakao.maps.LatLng(pt.lat, pt.lng), content: numContent, yAnchor: 1.9, xAnchor: 0.5
+        });
+        numOverlay.setMap(_mapInstance);
+        _routeLines.push(numOverlay);
+      });
       for(var i=0;i<routePoints.length-1;i++){
         var straightKm = haversineKm(routePoints[i], routePoints[i+1]);
         var estKm = straightKm * ROUTE_CORRECTION_FACTOR;
