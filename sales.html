@@ -437,7 +437,27 @@ tr.row-clickable:hover{background:var(--sf2);}
         <button class="btn" onclick="geocodeAllPeople()">📍 좌표 일괄 갱신</button>
         <span id="map-geo-status" style="font-size:12px;color:var(--muted);align-self:center;"></span>
       </div>
+      <div id="map-hq-filter" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
       <div id="sales-map" style="width:100%;height:520px;border-radius:12px;border:1px solid var(--bd);background:var(--sf2);"></div>
+
+      <div class="card" style="margin-top:16px;">
+        <div class="card-title">🚗 동선 보기 <span style="font-weight:400;color:var(--muted);font-size:11px;">(현대아이파크타워, 영동대로 520 기점 왕복)</span></div>
+        <p style="font-size:11.5px;color:var(--muted);margin-bottom:10px;">선택한 기간에 잡힌 약속(대상자 지정된 일정)을 자동으로 모아서, 아이파크타워에서 출발 → 가까운 곳부터 순서대로 방문 → 다시 아이파크타워로 돌아오는 동선을 그려요. 거리는 <b>직선거리×1.3 보정치(추정)</b>로 계산돼요 — 실제 도로거리와는 다를 수 있어요. 이미 지난 약속(초록)과 앞으로 있을 약속(파랑)을 색으로 구분해요.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+          <select id="route-period-select" onchange="refreshRouteStopsList()">
+            <option value="today">오늘</option>
+            <option value="week">이번 주</option>
+            <option value="month">이번 달</option>
+            <option value="all">전체(잡혀있는 모든 약속)</option>
+          </select>
+          <button class="btn" id="route-pick-mode-btn" onclick="toggleRoutePickMode()">📍 지도에서 클릭해 추가</button>
+          <button class="btn primary" onclick="drawAllDayRoutes()">🚗 동선 그리기</button>
+          <button class="btn" onclick="clearRouteLines()">지우기</button>
+        </div>
+        <div id="route-stops-list" style="margin-bottom:10px;"></div>
+        <div id="route-summary" style="font-size:13px;font-weight:700;"></div>
+        <div id="route-status" style="font-size:11.5px;color:var(--muted);margin-top:4px;"></div>
+      </div>
     </div>
 
     <!-- STAFF -->
@@ -602,6 +622,13 @@ tr.row-clickable:hover{background:var(--sf2);}
       </div>
 
       <div class="card">
+        <div class="card-title">🚗 동선(실제 도로경로) API 키 <span style="font-weight:400;color:var(--muted);font-size:11px;">(선택, 지금은 안 써도 돼요)</span></div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:10px;">지금 지도 탭 "동선 보기"는 <b>직선거리×1.3 보정치(추정)</b>로 동작 중이라 이 키 없이도 잘 써져요. 나중에 더 정확한 <b>실제 도로거리</b>로 업그레이드하고 싶으시면, <a href="https://developers.kakaomobility.com" target="_blank" style="color:var(--accent);">카카오모빌리티 디벨로퍼스</a>에서 "길찾기 API" 발급받은 REST API 키를 여기에 넣어주세요.</p>
+        <input type="text" id="cfg-kakao-mobility-key" placeholder="REST API 키 붙여넣기 (선택)">
+        <button class="btn primary" style="margin-top:8px;" onclick="saveKakaoMobilityKey()">저장</button>
+      </div>
+
+      <div class="card">
         <div class="card-title">📊 활동 저조 기준 설정</div>
         <p style="font-size:12px;color:var(--muted);margin-bottom:10px;">대시보드 "상시 체크 루틴" 카드에서 이 기준 미만이면 "저조자"로 잡아요.</p>
         <div style="display:flex;gap:16px;flex-wrap:wrap;">
@@ -755,6 +782,7 @@ var DEFAULT_INTERVENTION_CONFIG = {
 var appConfig = { contactCycleDays: 90, esmapThreshold: 5, tipThreshold: 3, messageTemplates: Object.assign({}, DEFAULT_MESSAGE_TEMPLATES),
   interventionLabels: Object.assign({}, DEFAULT_INTERVENTION_CONFIG.interventionLabels),
   interventionThresholds: Object.assign({}, DEFAULT_INTERVENTION_CONFIG.interventionThresholds),
+  kakaoMobilityKey: '', // 동선(실제 도로경로) 그리기용 카카오모빌리티 REST API 키. 지도용 JS키와는 별개.
   grid9BaselineYm: '' }; // 9-Box 그리드 "성장 기준월"(예: rFM 활동 시작월). YYYYMM, 미설정시 ''
 function fillTemplate(str, vars){
   return str.replace(/\{(\w+)\}/g, function(m, key){ return vars[key]!==undefined ? vars[key] : m; });
@@ -1007,7 +1035,7 @@ function boot(){
     appConfig = Object.assign({contactCycleDays:90, esmapThreshold:5, tipThreshold:3, messageTemplates:Object.assign({},DEFAULT_MESSAGE_TEMPLATES),
       interventionLabels:Object.assign({},DEFAULT_INTERVENTION_CONFIG.interventionLabels),
       interventionThresholds:Object.assign({},DEFAULT_INTERVENTION_CONFIG.interventionThresholds),
-      grid9BaselineYm:''}, res[7]||{});
+      kakaoMobilityKey:'', grid9BaselineYm:''}, res[7]||{});
     appConfig.messageTemplates = Object.assign({}, DEFAULT_MESSAGE_TEMPLATES, appConfig.messageTemplates||{});
     appConfig.interventionLabels = Object.assign({}, DEFAULT_INTERVENTION_CONFIG.interventionLabels, appConfig.interventionLabels||{});
     appConfig.interventionThresholds = Object.assign({}, DEFAULT_INTERVENTION_CONFIG.interventionThresholds, appConfig.interventionThresholds||{});
@@ -1067,7 +1095,7 @@ function switchTab(name){
   document.querySelectorAll('.tab').forEach(function(t){t.classList.toggle('active', t.dataset.tab===name);});
   document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active');});
   document.getElementById('view-'+name).classList.add('active');
-  if(name==='map') renderMap();
+  if(name==='map'){ renderMap(); refreshRouteStopsList(); }
   if(name==='report'){ initReportPeriod(); renderSurveyStatFilters(); }
 }
 
@@ -5998,7 +6026,15 @@ function renderConfigSettings(){
   if(esEl) esEl.value = appConfig.esmapThreshold;
   var tipThEl = document.getElementById('cfg-tip-th');
   if(tipThEl) tipThEl.value = appConfig.tipThreshold;
+  var kmEl = document.getElementById('cfg-kakao-mobility-key');
+  if(kmEl) kmEl.value = appConfig.kakaoMobilityKey||'';
   renderInterventionConfigSettings();
+}
+function saveKakaoMobilityKey(){
+  var v = document.getElementById('cfg-kakao-mobility-key').value.trim();
+  appConfig.kakaoMobilityKey = v;
+  fetch(FB_URL+ROOT+'/config.json',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({kakaoMobilityKey:v})});
+  showToast(v ? '카카오모빌리티 키가 저장됐어요.' : '키를 비웠어요.');
 }
 function renderInterventionConfigSettings(){
   var el = document.getElementById('intervention-cfg-editor');
@@ -6289,16 +6325,60 @@ function geocodeAddr(addr, cb){
     } else { cb(null); }
   });
 }
+/* ---------- 본부별 색상 + 필터 ---------- */
+var HQ_COLOR_PALETTE = ['#4361ee','#0f9d67','#e0294b','#a24bd8','#f2a94e','#0891b2','#db2777','#65a30d','#7c3aed','#ea580c','#0d9488','#be123c'];
+var _hqColorMap = null;
+function getHqColorMap(){
+  var hqs = [...new Set(Object.values(people).map(function(p){return p.hq;}).filter(Boolean))].sort();
+  if(_hqColorMap && Object.keys(_hqColorMap).length===hqs.length) return _hqColorMap;
+  _hqColorMap = {};
+  hqs.forEach(function(h,i){ _hqColorMap[h] = HQ_COLOR_PALETTE[i % HQ_COLOR_PALETTE.length]; });
+  return _hqColorMap;
+}
+var _mapHqFilter = null; // null=아직 초기화 전(전체 표시), Set으로 채워지면 그 본부만 표시
+function renderMapHqFilter(){
+  var el = document.getElementById('map-hq-filter');
+  if(!el) return;
+  var colorMap = getHqColorMap();
+  var hqs = Object.keys(colorMap);
+  if(_mapHqFilter===null){ _mapHqFilter = new Set(hqs); }
+  el.innerHTML = hqs.map(function(h){
+    var on = _mapHqFilter.has(h);
+    return '<span onclick="toggleMapHqFilter(\''+h+'\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:16px;font-size:11.5px;border:1.5px solid '+colorMap[h]+';background:'+(on?colorMap[h]:'transparent')+';color:'+(on?'#fff':colorMap[h])+';">'
+      +'<span style="width:8px;height:8px;border-radius:50%;background:'+(on?'#fff':colorMap[h])+';"></span>'+h
+    +'</span>';
+  }).join('')
+  + '<span onclick="setAllMapHqFilter(true)" style="cursor:pointer;font-size:11px;color:var(--accent);align-self:center;margin-left:4px;">전체선택</span>'
+  + '<span onclick="setAllMapHqFilter(false)" style="cursor:pointer;font-size:11px;color:var(--muted);align-self:center;margin-left:4px;">전체해제</span>';
+}
+function toggleMapHqFilter(hq){
+  if(_mapHqFilter.has(hq)) _mapHqFilter.delete(hq); else _mapHqFilter.add(hq);
+  renderMapHqFilter();
+  renderMap();
+}
+function setAllMapHqFilter(on){
+  var colorMap = getHqColorMap();
+  _mapHqFilter = on ? new Set(Object.keys(colorMap)) : new Set();
+  renderMapHqFilter();
+  renderMap();
+}
 function renderMap(){
   var statusEl = document.getElementById('map-geo-status');
   loadKakaoMapSdk(function(){
+    renderMapHqFilter();
     var mapDiv = document.getElementById('sales-map');
     if(!_mapInstance){
       _mapInstance = new kakao.maps.Map(mapDiv, { center: new kakao.maps.LatLng(37.5665,126.9780), level:8 });
     }
     _mapMarkers.forEach(function(m){ m.setMap(null); });
     _mapMarkers = [];
-    var withCoord = Object.keys(people).filter(function(id){ var p=people[id]; return p.officeLat && p.officeLng; });
+    var colorMap = getHqColorMap();
+    var withCoord = Object.keys(people).filter(function(id){
+      var p=people[id];
+      if(!(p.officeLat && p.officeLng)) return false;
+      if(_mapHqFilter && !_mapHqFilter.has(p.hq)) return false;
+      return true;
+    });
     var noAddrCount = Object.keys(people).filter(function(id){ var p=people[id]; return p.officeAddress && (!p.officeLat||!p.officeLng); }).length;
     if(statusEl) statusEl.textContent = withCoord.length+'명 표시 중'+(noAddrCount?' · 좌표 없는 주소 '+noAddrCount+'건 (좌표 일괄 갱신 눌러주세요)':'');
     if(!withCoord.length) return;
@@ -6306,17 +6386,205 @@ function renderMap(){
     withCoord.forEach(function(id){
       var p = people[id];
       var pos = new kakao.maps.LatLng(p.officeLat, p.officeLng);
-      var col = branchColor(p.branch);
+      var col = colorMap[p.hq] || '#888';
       var content = document.createElement('div');
       content.style.cursor='pointer';
       content.innerHTML = '<div style="width:16px;height:16px;border-radius:50%;background:'+col+';border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.35);"></div>';
       var overlay = new kakao.maps.CustomOverlay({ position:pos, content:content, yAnchor:0.5, xAnchor:0.5 });
       overlay.setMap(_mapInstance);
-      content.addEventListener('click', function(){ openProfile(id); });
+      content.addEventListener('click', function(){
+        if(_routePickMode){ addExtraRouteStop(id); }
+        else { openProfile(id); }
+      });
       _mapMarkers.push(overlay);
       bounds.extend(pos);
     });
     _mapInstance.setBounds(bounds);
+  });
+}
+
+/* ---------- 동선 보기 (아이파크타워 기점 왕복, 실제 도로경로) ---------- */
+var ROUTE_BASE_ADDR = '서울 강남구 영동대로 520'; // 현대아이파크타워
+var _basePointCache = null;
+function getBasePosition(cb){
+  if(_basePointCache){ cb(_basePointCache); return; }
+  loadKakaoMapSdk(function(){
+    geocodeAddr(ROUTE_BASE_ADDR, function(coord){
+      _basePointCache = coord;
+      cb(coord);
+    });
+  });
+}
+function haversineKm(a,b){
+  var R=6371;
+  var dLat=(b.lat-a.lat)*Math.PI/180, dLng=(b.lng-a.lng)*Math.PI/180;
+  var la1=a.lat*Math.PI/180, la2=b.lat*Math.PI/180;
+  var h = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)*Math.sin(dLng/2);
+  return R*2*Math.asin(Math.sqrt(h));
+}
+function nearestNeighborOrder(base, points){
+  var remaining = points.slice();
+  var order = [];
+  var current = base;
+  while(remaining.length){
+    var bestIdx=0, bestDist=Infinity;
+    remaining.forEach(function(p,i){ var d=haversineKm(current,p); if(d<bestDist){bestDist=d;bestIdx=i;} });
+    var next = remaining.splice(bestIdx,1)[0];
+    order.push(next);
+    current = next;
+  }
+  return order;
+}
+function getRouteDateRange(period){
+  var today = new Date(); today.setHours(0,0,0,0);
+  var todayStr = today.toISOString().slice(0,10);
+  if(period==='today') return {start:todayStr, end:todayStr};
+  if(period==='week'){
+    var day = today.getDay();
+    var monday = new Date(today); monday.setDate(today.getDate() - ((day+6)%7));
+    var sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
+    return {start:monday.toISOString().slice(0,10), end:sunday.toISOString().slice(0,10)};
+  }
+  if(period==='month'){
+    var first = new Date(today.getFullYear(), today.getMonth(), 1);
+    var last = new Date(today.getFullYear(), today.getMonth()+1, 0);
+    return {start:first.toISOString().slice(0,10), end:last.toISOString().slice(0,10)};
+  }
+  return {start:null, end:null};
+}
+var _routeExtraStops = {}; // dateStr -> [empId,...] (지도클릭으로 임시 추가된 정거장)
+var _routeExcluded = {};   // "date|empId" -> true (목록에서 제외 체크한 것)
+function getRouteScheduleGroups(period){
+  var range = getRouteDateRange(period);
+  var groups = {};
+  Object.keys(schedules).forEach(function(id){
+    var s = schedules[id];
+    if(!s.empId || !s.date) return;
+    var p = people[s.empId];
+    if(!p || !p.officeLat || !p.officeLng) return;
+    if(range.start && (s.date<range.start || s.date>range.end)) return;
+    if(!groups[s.date]) groups[s.date]=[];
+    if(groups[s.date].indexOf(s.empId)===-1) groups[s.date].push(s.empId);
+  });
+  Object.keys(_routeExtraStops).forEach(function(d){
+    if(range.start && (d<range.start || d>range.end)) return;
+    if(!groups[d]) groups[d]=[];
+    _routeExtraStops[d].forEach(function(empId){ if(groups[d].indexOf(empId)===-1) groups[d].push(empId); });
+  });
+  return groups;
+}
+function refreshRouteStopsList(){
+  var periodEl = document.getElementById('route-period-select');
+  var period = periodEl ? periodEl.value : 'today';
+  var groups = getRouteScheduleGroups(period);
+  var dates = Object.keys(groups).sort();
+  var el = document.getElementById('route-stops-list');
+  if(!el) return;
+  if(!dates.length){ el.innerHTML = '<div class="empty" style="font-size:12px;">이 기간에 대상자 지정된 일정이 없어요. 지도에서 마커를 클릭해 추가하시거나 다른 기간을 선택해주세요.</div>'; return; }
+  var todayStr = new Date().toISOString().slice(0,10);
+  el.innerHTML = dates.map(function(d){
+    var isPast = d < todayStr;
+    var rows = groups[d].map(function(empId){
+      var p = people[empId];
+      var key = d+'|'+empId;
+      var checked = !_routeExcluded[key];
+      return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:3px 0;">'
+        +'<input type="checkbox" '+(checked?'checked':'')+' onchange="toggleRouteStopExclude(\''+key+'\',this.checked)" style="width:auto;">'
+        + (p?p.name:empId) + ' <span style="color:var(--muted);font-size:10.5px;">'+(p?((p.hq||'')+'·'+(p.branch||'')):'')+'</span>'
+      +'</label>';
+    }).join('');
+    return '<div style="margin-bottom:8px;padding:8px;background:var(--sf2);border-radius:8px;">'
+      +'<div style="font-size:11.5px;font-weight:700;color:'+(isPast?'var(--good)':'var(--accent)')+';margin-bottom:4px;">'+fmtDate8(d)+(isPast?' (완료)':' (예정)')+'</div>'
+      + rows
+    +'</div>';
+  }).join('');
+}
+function toggleRouteStopExclude(key, checked){
+  if(checked) delete _routeExcluded[key]; else _routeExcluded[key]=true;
+}
+var _routePickMode = false;
+function toggleRoutePickMode(){
+  _routePickMode = !_routePickMode;
+  var btn = document.getElementById('route-pick-mode-btn');
+  if(btn) btn.classList.toggle('primary', _routePickMode);
+  showToast(_routePickMode ? '지도에서 마커를 클릭하면 오늘 동선에 추가돼요. 다시 누르면 꺼져요.' : '추가 모드를 껐어요.');
+}
+function addExtraRouteStop(empId){
+  var todayStr = new Date().toISOString().slice(0,10);
+  if(!_routeExtraStops[todayStr]) _routeExtraStops[todayStr]=[];
+  if(_routeExtraStops[todayStr].indexOf(empId)===-1){
+    _routeExtraStops[todayStr].push(empId);
+    showToast((people[empId]?people[empId].name:empId)+'님을 오늘 동선에 추가했어요.');
+    refreshRouteStopsList();
+  } else {
+    showToast('이미 추가된 정거장이에요.');
+  }
+}
+async function fetchKakaoRouteLeg(origin, destination){
+  var key = appConfig.kakaoMobilityKey;
+  if(!key) throw new Error('NO_KEY');
+  var url = 'https://apis-navi.kakaomobility.com/v1/directions?origin='+origin.lng+','+origin.lat+'&destination='+destination.lng+','+destination.lat+'&priority=RECOMMEND';
+  var res = await fetch(url, { headers: { 'Authorization': 'KakaoAK '+key } });
+  var data = await res.json();
+  if(!data.routes || !data.routes[0] || data.routes[0].result_code!==0){
+    throw new Error((data.routes && data.routes[0] && data.routes[0].result_msg) || '경로탐색 실패');
+  }
+  var route = data.routes[0];
+  var path = [];
+  (route.sections||[]).forEach(function(sec){
+    (sec.roads||[]).forEach(function(road){
+      var v = road.vertexes||[];
+      for(var i=0;i<v.length;i+=2){ path.push({ lng:v[i], lat:v[i+1] }); }
+    });
+  });
+  return { distanceM: route.summary.distance, path: path };
+}
+var _routeLines = [];
+function clearRouteLines(){
+  _routeLines.forEach(function(l){ l.setMap(null); });
+  _routeLines = [];
+  var sumEl = document.getElementById('route-summary'); if(sumEl) sumEl.innerHTML='';
+  var stEl = document.getElementById('route-status'); if(stEl) stEl.textContent='';
+}
+var ROUTE_CORRECTION_FACTOR = 1.3; // 도시 도로망은 직선거리보다 평균 1.3배 정도 길다는 교통공학 경험치 기반 보정
+function drawAllDayRoutes(){
+  clearRouteLines();
+  var statusEl = document.getElementById('route-status');
+  var periodEl = document.getElementById('route-period-select');
+  var period = periodEl ? periodEl.value : 'today';
+  var groups = getRouteScheduleGroups(period);
+  var dates = Object.keys(groups).filter(function(d){
+    return groups[d].some(function(empId){ return !_routeExcluded[d+'|'+empId]; });
+  }).sort();
+  if(!dates.length){ showToast('그릴 동선이 없어요.'); return; }
+  if(statusEl) statusEl.textContent = '기점 주소 확인 중...';
+  getBasePosition(function(base){
+    if(!base){ if(statusEl) statusEl.textContent = '⚠ 기점 주소(아이파크타워) 좌표를 찾을 수 없어요.'; return; }
+    var totalPastKm = 0, totalFutureKm = 0;
+    var todayStr = new Date().toISOString().slice(0,10);
+    dates.forEach(function(d){
+      var empIds = groups[d].filter(function(empId){ return !_routeExcluded[d+'|'+empId]; });
+      if(!empIds.length) return;
+      var points = empIds.map(function(empId){ return {lat:people[empId].officeLat, lng:people[empId].officeLng, empId:empId}; });
+      var ordered = nearestNeighborOrder(base, points);
+      var routePoints = [base].concat(ordered).concat([base]);
+      var isPast = d < todayStr;
+      var color = isPast ? '#0f9d67' : '#4361ee';
+      for(var i=0;i<routePoints.length-1;i++){
+        var straightKm = haversineKm(routePoints[i], routePoints[i+1]);
+        var estKm = straightKm * ROUTE_CORRECTION_FACTOR;
+        if(isPast) totalPastKm += estKm; else totalFutureKm += estKm;
+        var polyline = new kakao.maps.Polyline({
+          path: [routePoints[i], routePoints[i+1]].map(function(pt){ return new kakao.maps.LatLng(pt.lat, pt.lng); }),
+          strokeWeight: 4, strokeColor: color, strokeOpacity: 0.85, strokeStyle: 'solid'
+        });
+        polyline.setMap(_mapInstance);
+        _routeLines.push(polyline);
+      }
+    });
+    if(statusEl) statusEl.textContent = '✅ 동선 표시 완료 (직선거리×'+ROUTE_CORRECTION_FACTOR+' 보정 추정치 — 실제 도로거리와 다를 수 있어요)';
+    var sumEl = document.getElementById('route-summary');
+    if(sumEl) sumEl.innerHTML = '누적 이동거리(추정) — <span style="color:#0f9d67;">완료 '+totalPastKm.toFixed(1)+'km</span> · <span style="color:#4361ee;">예정 '+totalFutureKm.toFixed(1)+'km</span> · 합계 '+(totalPastKm+totalFutureKm).toFixed(1)+'km';
   });
 }
 // 서베이 문항 'officeAddr'의 현재 라벨을 찾아, 그 라벨로 응답된 텍스트를 찾음 (문항 라벨이 바뀌면 옛 응답과 매칭이 안 될 수 있음)
