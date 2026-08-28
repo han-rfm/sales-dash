@@ -3767,8 +3767,8 @@ function buildProfileHtml(empId, p){
       +'<span onclick="toggleFav(\''+empId+'\')" style="cursor:pointer;font-size:20px;color:'+(p.fav?'var(--warn)':'var(--bd)')+';">★</span>'
       +'<div><div class="profile-name">'+p.name+' <span style="font-size:12px;color:var(--muted);">'+(p.position||'')+'</span>'
         +'<span style="margin-left:8px;">'
-          +'<input type="checkbox" '+(p.chk1?'checked':'')+' onchange="toggleOrgChk(\''+empId+'\',1,this.checked)" style="width:auto;vertical-align:middle;">'
-          +'<input type="checkbox" '+(p.chk2?'checked':'')+' onchange="toggleOrgChk(\''+empId+'\',2,this.checked)" style="width:auto;vertical-align:middle;margin-left:4px;">'
+          +'<input type="checkbox" id="chk1-'+empId+'" '+(p.chk1?'checked':'')+' onchange="toggleOrgChk(\''+empId+'\',1,this.checked)" style="width:auto;vertical-align:middle;">'
+          +'<input type="checkbox" id="chk2-'+empId+'" '+(p.chk2?'checked':'')+' onchange="toggleOrgChk(\''+empId+'\',2,this.checked)" style="width:auto;vertical-align:middle;margin-left:4px;">'
         +'</span>'
       +'</div>'
       +'<div class="profile-sub">'+(p.hq||'')+' · '+(p.branch||'')+' <span style="color:'+branchColor(p.branch)+';">●</span></div></div>'
@@ -3813,7 +3813,7 @@ function buildProfileHtml(empId, p){
     +'</div></div>'
   +'<div style="margin:10px 0;">'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">📸 인증샷 <span style="color:var(--dim);">(현장 방문 사진 — 본부별로 자동 정리돼요)</span></label>'
-    +'<input type="file" id="checkin-photo-input-'+empId+'" accept="image/*" capture="environment" style="display:none;" onchange="uploadCheckinPhoto(\''+empId+'\')">'
+    +'<input type="file" id="checkin-photo-input-'+empId+'" accept="image/*" style="display:none;" onchange="uploadCheckinPhoto(\''+empId+'\')">'
     +'<button class="btn" onclick="document.getElementById(\'checkin-photo-input-'+empId+'\').click()">📷 촬영/업로드</button>'
     +' <span id="checkin-photo-status-'+empId+'" style="font-size:11px;color:var(--muted);"></span>'
     +'<div id="checkin-photo-gallery-'+empId+'" style="margin-top:8px;">'+buildCheckinPhotoGalleryHtml(empId)+'</div>'
@@ -6236,9 +6236,20 @@ function uploadCheckinPhoto(empId){
       if(!checkinPhotos[empId]) checkinPhotos[empId] = {};
       checkinPhotos[empId][photoId] = entry;
       if(statusEl) statusEl.textContent = '';
-      showToast('인증샷 업로드 완료!');
       renderCheckinPhotoGallery(empId);
       fileInput.value = '';
+      // 인증샷 = 방문 증거이므로, 아직 방문완료(체크 2개) 안 돼있으면 자동으로 체크해줌
+      var autoChecked = (!p.chk1 || !p.chk2);
+      if(autoChecked){
+        toggleOrgChk(empId, 1, true);
+        toggleOrgChk(empId, 2, true);
+        var chk1El = document.getElementById('chk1-'+empId);
+        var chk2El = document.getElementById('chk2-'+empId);
+        if(chk1El) chk1El.checked = true;
+        if(chk2El) chk2El.checked = true;
+        if(typeof renderOrgList==='function') renderOrgList();
+      }
+      showToast('인증샷 업로드 완료!'+(autoChecked?' (방문완료로 자동 체크됨)':''));
     })
     .catch(function(err){
       if(statusEl) statusEl.textContent = '';
