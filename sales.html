@@ -217,7 +217,7 @@ tr.row-clickable:hover{background:var(--sf2);}
             <button class="btn" id="reach-daily-btn-90" onclick="setReachDailyRange(90)" style="font-size:11px;padding:5px 9px;">90일</button>
           </div>
         </div>
-        <p style="font-size:11px;color:var(--muted);margin-bottom:8px;">일별로 어떤 Reach를 얼마나 했는지 <b>점수</b>로 보여줘요. 전화·문자·서베이응답은 1점, <b>만남(컨택메모) 1점</b>, <b>컨텍스케쥴(캘린더에 유형="컨택"으로 등록된 일정) 20점</b>으로 가중치를 둬서 계산돼요.</p>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:8px;">일별로 어떤 Reach를 얼마나 했는지 <b>점수</b>로 보여줘요. 전화·문자·서베이응답은 1점, <b>만남(컨택메모) 1점</b>, <b>컨텍스케쥴(캘린더 유형="컨택") 20점</b>, <b>컨텐츠촬영 100점</b>으로 가중치를 둬서 계산돼요.</p>
         <div style="position:relative;height:160px;margin-bottom:18px;"><canvas id="reachDailyChart"></canvas></div>
 
         <div style="border-top:1px solid var(--bd);padding-top:14px;margin-bottom:18px;">
@@ -2012,8 +2012,8 @@ function buildDailyReachSeries(days){
     var d = new Date(today.getFullYear(), today.getMonth(), today.getDate()+i);
     dayKeys.push(d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()));
   }
-  var buckets = {}; // dayKey -> {전화, 문자, '만남(컨택메모)', 서베이 응답, 컨텍스케쥴} — 건수가 아니라 가중치(점수) 합산
-  dayKeys.forEach(function(k){ buckets[k] = {'전화':0,'문자':0,'만남(컨택메모)':0,'서베이 응답':0,'컨텍스케쥴':0}; });
+  var buckets = {}; // dayKey -> {전화, 문자, '만남(컨택메모)', 서베이 응답, 컨텍스케쥴, 컨텐츠촬영} — 건수가 아니라 가중치(점수) 합산
+  dayKeys.forEach(function(k){ buckets[k] = {'전화':0,'문자':0,'만남(컨택메모)':0,'서베이 응답':0,'컨텍스케쥴':0,'컨텐츠촬영':0}; });
   log.forEach(function(l){
     var dk = (l.dt||'').slice(0,10);
     if(!buckets[dk]) return;
@@ -2028,7 +2028,7 @@ function renderReachDailyChart(){
   var data = buildDailyReachSeries(_reachDailyRange);
   var labels = data.dayKeys.map(function(k){ var p=k.split('-'); return Number(p[1])+'.'+Number(p[2]); });
   var todayIdx = data.dayKeys.indexOf(data.todayKey);
-  var typeColors = { '전화':'#4361ee', '문자':'#7c9cff', '만남(컨택메모)':'#f2a94e', '서베이 응답':'#0f9d67', '컨텍스케쥴':'#d8306b' };
+  var typeColors = { '전화':'#4361ee', '문자':'#7c9cff', '만남(컨택메모)':'#f2a94e', '서베이 응답':'#0f9d67', '컨텍스케쥴':'#d8306b', '컨텐츠촬영':'#7c3aed' };
   var datasets = Object.keys(typeColors).map(function(t){
     return { label:t, data:data.dayKeys.map(function(k){ return data.buckets[k][t]; }), backgroundColor:typeColors[t], borderRadius:3, maxBarThickness:_reachDailyRange<=7?26:(_reachDailyRange<=30?10:4) };
   });
@@ -2251,6 +2251,13 @@ function buildActivityLog(){
     var p = people[s.empId]; if(!p) return;
     log.push({ dt:s.date, type:'컨텍스케쥴', icon:'📅', empId:s.empId, name:p.name, branch:(p.hq||'')+' '+(p.branch||''), engage:false, reach:true, weight:20 });
   });
+  // 컨텐츠촬영: 캘린더에 유형="컨텐츠촬영"으로 등록된 일정, 최고배점(+100점). 특정 eFSR 없이(대상자 없음) 등록하는 경우가 많아서 empId 필수 조건은 안 둠.
+  Object.keys(schedules).forEach(function(id){
+    var s = schedules[id];
+    if(s.type!=='컨텐츠촬영' || !s.date) return;
+    var p = s.empId ? people[s.empId] : null;
+    log.push({ dt:s.date, type:'컨텐츠촬영', icon:'🎬', empId:s.empId||null, name:(p?p.name:(s.memo||'컨텐츠촬영')), branch:(p?((p.hq||'')+' '+(p.branch||'')):(s.location||'')), engage:false, reach:true, weight:100 });
+  });
   log.sort(function(a,b){ return (b.dt||'').localeCompare(a.dt||''); });
   return log;
 }
@@ -2268,6 +2275,7 @@ function openActivityLogModal(){
       +'<option value="문자">💬 문자</option>'
       +'<option value="만남(컨택메모)">📝 만남(컨택메모)</option>'
       +'<option value="컨텍스케쥴">📅 컨텍스케쥴</option>'
+      +'<option value="컨텐츠촬영">🎬 컨텐츠촬영</option>'
       +'<option value="서베이 응답">📋 서베이 응답</option>'
     +'</select>'
     +'<div id="activity-log-list" style="max-height:60vh;overflow-y:auto;"></div>';
@@ -5129,7 +5137,7 @@ function calShift(dir){
   if(calMonth>11){calMonth=0;calYear++;}
   renderCalendar();
 }
-var TYPE_COLORS = { 컨택:'#4361ee', 코칭:'#0f9d67', 교육:'#c97a12', 행사:'#a24bd8', 본사미팅:'#d8564b', ETC:'#6b7280' };
+var TYPE_COLORS = { 컨택:'#4361ee', 코칭:'#0f9d67', 교육:'#c97a12', 행사:'#a24bd8', 본사미팅:'#d8564b', 컨텐츠촬영:'#ec1f8f', ETC:'#6b7280' };
 function scheduleOccursOnDate(s, dateStr){
   if(s.exceptions && s.exceptions.indexOf(dateStr)>-1) return false;
   if(s.date===dateStr) return true;
