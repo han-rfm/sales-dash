@@ -6529,9 +6529,11 @@ function renderMap(){
       _mapInstance = new kakao.maps.Map(mapDiv, { center: new kakao.maps.LatLng(37.5665,126.9780), level:8 });
     }
     if(!_mapZoomListenerRegistered){
+      var _zoomRedrawTimer = null;
       kakao.maps.event.addListener(_mapInstance, 'zoom_changed', function(){
-        var newSize = photoSizeForLevel(_mapInstance.getLevel());
-        _photoOverlayImgs.forEach(function(img){ img.style.width = newSize+'px'; img.style.height = newSize+'px'; });
+        // 사진 크기만 CSS로 바꾸면 카카오맵 내부의 "핀 기준 위치 계산"이 안 맞아서 엉뚱한 곳에 뜸 → 줌 바뀌면 그 시점 크기로 통째로 다시 그림
+        clearTimeout(_zoomRedrawTimer);
+        _zoomRedrawTimer = setTimeout(function(){ renderMap(); }, 150);
       });
       _mapZoomListenerRegistered = true;
     }
