@@ -217,7 +217,7 @@ tr.row-clickable:hover{background:var(--sf2);}
             <button class="btn" id="reach-daily-btn-90" onclick="setReachDailyRange(90)" style="font-size:11px;padding:5px 9px;">90일</button>
           </div>
         </div>
-        <p style="font-size:11px;color:var(--muted);margin-bottom:8px;">일별로 어떤 Reach를 얼마나 했는지 보여줘요. 전화·문자·만남메모·서베이응답을 색깔로 구분했어요.</p>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:8px;">일별로 어떤 Reach를 얼마나 했는지 <b>점수</b>로 보여줘요. 전화·문자·서베이응답은 1점, <b>만남(컨택메모) 1점</b>, <b>컨텍스케쥴(캘린더에 유형="컨택"으로 등록된 일정) 20점</b>으로 가중치를 둬서 계산돼요.</p>
         <div style="position:relative;height:160px;margin-bottom:18px;"><canvas id="reachDailyChart"></canvas></div>
 
         <div style="border-top:1px solid var(--bd);padding-top:14px;margin-bottom:18px;">
@@ -2012,13 +2012,13 @@ function buildDailyReachSeries(days){
     var d = new Date(today.getFullYear(), today.getMonth(), today.getDate()+i);
     dayKeys.push(d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()));
   }
-  var buckets = {}; // dayKey -> {전화, 문자, '만남(컨택메모)', 서베이 응답}
-  dayKeys.forEach(function(k){ buckets[k] = {'전화':0,'문자':0,'만남(컨택메모)':0,'서베이 응답':0}; });
+  var buckets = {}; // dayKey -> {전화, 문자, '만남(컨택메모)', 서베이 응답, 컨텍스케쥴} — 건수가 아니라 가중치(점수) 합산
+  dayKeys.forEach(function(k){ buckets[k] = {'전화':0,'문자':0,'만남(컨택메모)':0,'서베이 응답':0,'컨텍스케쥴':0}; });
   log.forEach(function(l){
     var dk = (l.dt||'').slice(0,10);
     if(!buckets[dk]) return;
     if(buckets[dk][l.type]===undefined) return;
-    buckets[dk][l.type]++;
+    buckets[dk][l.type] += (l.weight||1);
   });
   return { dayKeys:dayKeys, buckets:buckets, todayKey:todayKey };
 }
@@ -2028,7 +2028,7 @@ function renderReachDailyChart(){
   var data = buildDailyReachSeries(_reachDailyRange);
   var labels = data.dayKeys.map(function(k){ var p=k.split('-'); return Number(p[1])+'.'+Number(p[2]); });
   var todayIdx = data.dayKeys.indexOf(data.todayKey);
-  var typeColors = { '전화':'#4361ee', '문자':'#7c9cff', '만남(컨택메모)':'#f2a94e', '서베이 응답':'#0f9d67' };
+  var typeColors = { '전화':'#4361ee', '문자':'#7c9cff', '만남(컨택메모)':'#f2a94e', '서베이 응답':'#0f9d67', '컨텍스케쥴':'#d8306b' };
   var datasets = Object.keys(typeColors).map(function(t){
     return { label:t, data:data.dayKeys.map(function(k){ return data.buckets[k][t]; }), backgroundColor:typeColors[t], borderRadius:3, maxBarThickness:_reachDailyRange<=7?26:(_reachDailyRange<=30?10:4) };
   });
@@ -2043,7 +2043,7 @@ function renderReachDailyChart(){
         x:{ stacked:true, grid:{display:false}, ticks:{font:{size:9}, maxRotation:0, autoSkip:true, maxTicksLimit: _reachDailyRange<=30?_reachDailyRange:15,
               color:function(ctx){ return ctx.index===todayIdx ? '#2563eb' : '#8a8f9c'; },
               font:function(ctx){ return ctx.index===todayIdx ? {size:9,weight:'700'} : {size:9}; } } },
-        y:{ stacked:true, beginAtZero:true, grid:{color:'rgba(128,128,128,0.15)'}, ticks:{font:{size:10}, precision:0} }
+        y:{ stacked:true, beginAtZero:true, grid:{color:'rgba(128,128,128,0.15)'}, ticks:{font:{size:10}, precision:0}, title:{display:true, text:'점수', font:{size:10}} }
       }
     }
   });
@@ -2085,9 +2085,9 @@ function getMonthlyComparisonMonths(){
 function monthlyReachTotal(ym){ // ym = 'YYYYMM'
   var log = buildActivityLog().filter(function(l){ return l.reach; });
   var dashYm = ym.slice(0,4)+'-'+ym.slice(4,6);
-  var count = 0;
-  log.forEach(function(l){ if((l.dt||'').slice(0,7)===dashYm) count++; });
-  return count;
+  var score = 0;
+  log.forEach(function(l){ if((l.dt||'').slice(0,7)===dashYm) score += (l.weight||1); });
+  return score;
 }
 var _monthlyReachMetricChartInstance = null;
 function renderMonthlyReachMetricChart(){
@@ -2102,7 +2102,7 @@ function renderMonthlyReachMetricChart(){
   var reachData = months.map(monthlyReachTotal);
   var modeEl = document.getElementById('monthly-overlay-metric');
   var mode = modeEl ? modeEl.value : 'all';
-  var datasets = [{ type:'bar', label:'Reach 활동(월합계)', data:reachData, backgroundColor:'#c9cfe0', borderRadius:4, yAxisID:'yReach', order:2 }];
+  var datasets = [{ type:'bar', label:'Reach 점수(월합계)', data:reachData, backgroundColor:'#c9cfe0', borderRadius:4, yAxisID:'yReach', order:2 }];
   var scales = {
     x:{ grid:{display:false}, ticks:{font:{size:10}} },
     yReach:{ position:'left', beginAtZero:true, grid:{color:'rgba(128,128,128,0.15)'}, ticks:{font:{size:10}, precision:0} }
@@ -2220,7 +2220,7 @@ function buildActivityLog(){
   Object.keys(contacts).forEach(function(id){
     var p = people[id]; if(!p) return;
     Object.values(contacts[id]).forEach(function(c){
-      log.push({ dt:c.date, type:(c.type==='call'?'전화':'문자'), icon:(c.type==='call'?'📞':'💬'), empId:id, name:p.name, branch:(p.hq||'')+' '+(p.branch||''), engage:false, reach:true });
+      log.push({ dt:c.date, type:(c.type==='call'?'전화':'문자'), icon:(c.type==='call'?'📞':'💬'), empId:id, name:p.name, branch:(p.hq||'')+' '+(p.branch||''), engage:false, reach:true, weight:1 });
     });
   });
   // MGR Reach 등 people에 없는 대상 — 프로필 클릭 이동은 없지만 Activity Log·Reach Point엔 반영
@@ -2229,20 +2229,27 @@ function buildActivityLog(){
     if(id.indexOf('testself')===0) return; // 나에게 테스트 발송은 실제 활동이 아니므로 제외
     var roleLabel = id.indexOf('mgr')===0 ? '👔 MGR' : '기타';
     Object.values(contacts[id]).forEach(function(c){
-      log.push({ dt:c.date, type:(c.type==='call'?'전화':'문자'), icon:(c.type==='call'?'📞':'💬'), empId:null, name:(c.name||'담당자'), branch:roleLabel, engage:false, reach:true });
+      log.push({ dt:c.date, type:(c.type==='call'?'전화':'문자'), icon:(c.type==='call'?'📞':'💬'), empId:null, name:(c.name||'담당자'), branch:roleLabel, engage:false, reach:true, weight:1 });
     });
   });
   Object.keys(notes).forEach(function(id){
     var p = people[id]; if(!p) return;
     Object.values(notes[id]).forEach(function(n){
-      log.push({ dt:n.date, type:'만남(컨택메모)', icon:'📝', empId:id, name:p.name, branch:(p.hq||'')+' '+(p.branch||''), engage:false, reach:true, note:n.text });
+      log.push({ dt:n.date, type:'만남(컨택메모)', icon:'📝', empId:id, name:p.name, branch:(p.hq||'')+' '+(p.branch||''), engage:false, reach:true, note:n.text, weight:1 });
     });
   });
   Object.keys(surveyResponses).forEach(function(id){
     var p = people[id]; if(!p) return;
     Object.values(surveyResponses[id]).forEach(function(r){
-      log.push({ dt:r.submittedAt, type:'서베이 응답', icon:'📋', empId:id, name:p.name, branch:(p.hq||'')+' '+(p.branch||''), engage:true, reach:true });
+      log.push({ dt:r.submittedAt, type:'서베이 응답', icon:'📋', empId:id, name:p.name, branch:(p.hq||'')+' '+(p.branch||''), engage:true, reach:true, weight:1 });
     });
+  });
+  // 컨텍스케쥴: 캘린더에 유형="컨택"으로 등록된 일정 그 자체를 실적으로 인정 (등록되면 즉시 인정, +20점으로 고배점)
+  Object.keys(schedules).forEach(function(id){
+    var s = schedules[id];
+    if(!s.empId || s.type!=='컨택' || !s.date) return;
+    var p = people[s.empId]; if(!p) return;
+    log.push({ dt:s.date, type:'컨텍스케쥴', icon:'📅', empId:s.empId, name:p.name, branch:(p.hq||'')+' '+(p.branch||''), engage:false, reach:true, weight:20 });
   });
   log.sort(function(a,b){ return (b.dt||'').localeCompare(a.dt||''); });
   return log;
@@ -2260,6 +2267,7 @@ function openActivityLogModal(){
       +'<option value="전화">📞 전화</option>'
       +'<option value="문자">💬 문자</option>'
       +'<option value="만남(컨택메모)">📝 만남(컨택메모)</option>'
+      +'<option value="컨텍스케쥴">📅 컨텍스케쥴</option>'
       +'<option value="서베이 응답">📋 서베이 응답</option>'
     +'</select>'
     +'<div id="activity-log-list" style="max-height:60vh;overflow-y:auto;"></div>';
@@ -4322,7 +4330,7 @@ function openQuickScheduleModal(empId, presetDate){
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">시작일</label>'
     +'<input type="date" id="qs-date" value="'+today+'" onchange="document.getElementById(\'sched-end-date\').min=this.value;">'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">유형</label>'
-    +'<select id="qs-type"><option>컨택</option><option>교육</option><option>행사</option><option>본사미팅</option><option>ETC</option></select>'
+    +'<select id="qs-type"><option>컨택</option><option>교육</option><option>행사</option><option>본사미팅</option><option>컨텐츠촬영</option><option>ETC</option></select>'
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">시간 (선택)</label>'
     +buildTimeSelectHtml('qs-time')
     +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">종료일 (선택, 비우면 당일만 · 여러 날이면 달력에 막대로 이어져 표시돼요)</label>'
@@ -5252,7 +5260,7 @@ function openDayModal(dateStr){
       +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">시작일</label>'
       +'<input type="date" id="sched-start-date" value="'+dateStr+'" onchange="onSchedStartDateChange()">'
       +'<label style="font-size:11px;color:var(--muted);display:block;margin:8px 0 4px;">유형</label>'
-      +'<select id="sched-type"><option>컨택</option><option>교육</option><option>행사</option><option>본사미팅</option><option>ETC</option></select>'
+      +'<select id="sched-type"><option>컨택</option><option>교육</option><option>행사</option><option>본사미팅</option><option>컨텐츠촬영</option><option>ETC</option></select>'
       +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">'
         +'<div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">장소 / 웹미팅 링크</label>'
         +'<input type="text" id="sched-location" placeholder="예: 강남 사무실, 또는 https://zoom.us/..."></div>'
