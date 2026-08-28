@@ -436,6 +436,7 @@ tr.row-clickable:hover{background:var(--sf2);}
       <div class="filter-row">
         <button class="btn" onclick="importOfficeAddrFromSurvey()">📥 서베이에서 주소 가져오기</button>
         <button class="btn" onclick="geocodeAllPeople()">📍 좌표 일괄 갱신</button>
+        <button class="btn" id="map-show-all-photos-btn" onclick="toggleShowAllPhotos()">🖼 사진 모두 보기</button>
         <span id="map-geo-status" style="font-size:12px;color:var(--muted);align-self:center;"></span>
       </div>
       <div id="map-hq-filter" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
@@ -686,6 +687,8 @@ var FB_URL = 'https://cleaning-498705-default-rtdb.asia-southeast1.firebasedatab
 // (sales.html을 로컬 다운로드 파일로 열어서 발송 버튼을 누르면 location이 file:///... 이 되어
 //  링크가 깨지는 사고가 있었음 — 2026-08 확인. 항상 실제 배포 주소로 나가도록 고정.)
 var SURVEY_BASE_URL = 'https://han-rfm.github.io/sales-dash/'; // survey.html, letter.html 등 공개페이지 전부 이 주소 기준
+var CLOUDINARY_CLOUD_NAME = 'kpzgmwk0'; // 인증샷 업로드용 (프로필/지도 핀 사진)
+var CLOUDINARY_UPLOAD_PRESET = 'sqz1xefh'; // Unsigned 프리셋 — API 키/시크릿 노출 없이 브라우저에서 바로 업로드 가능
 var APP_PASSWORD = '777'; // 여기 원하는 비밀번호로 바꿔주세요. 페이지 소스보기하면 그대로 보이니, 남한테 공유 안 하는 링크에서만 쓰는 걸 권장드려요.
 var SOLAPI_API_KEY = 'NCS8HYGUCLJBXZU0';
 var SOLAPI_API_SECRET = 'SPTCPSWBN4DTCBKTVYBVI8URHNCOVEGC'; // ⚠ 브라우저 소스에 그대로 노출됩니다 (정훈님 동의하에 반영)
@@ -797,6 +800,7 @@ var surveyReopened = {};     // empId -> true : 정훈님이 '재참여 허용' 
 var campaignMeta = {};       // campaignTag -> {tag, title, createdAt} : 단체 Reach 보낼 때 적은 제목/목적
 var rollingLetters = {};     // empId -> {empId, name, hq, branch, message, submittedAt} : 방문완료 eFSR이 남긴 지점 편지
 var promoAssets = {};        // assetId -> {hq, branch, type:'photo'|'text', title, content, createdAt} : 조직별 프로모션 자료(사진링크/텍스트)
+var checkinPhotos = {};      // empId -> { photoId -> {url, publicId, hq, branch, uploadedAt} } : 현장 방문 인증샷 (Cloudinary 저장)
 function sanitizeFbKey(s){ return String(s).replace(/[.#$/\[\]]/g, '_'); }
 
 // 5점 리커트 척도 공통 옵션 (scale 타입 필드는 항상 이 5개 사용)
@@ -1025,7 +1029,8 @@ function boot(){
     fetch(FB_URL+ROOT+'/surveyReopened.json').then(function(r){return r.json();}),
     fetch(FB_URL+ROOT+'/campaignMeta.json').then(function(r){return r.json();}),
     fetch(FB_URL+ROOT+'/rollingLetters.json').then(function(r){return r.json();}),
-    fetch(FB_URL+ROOT+'/promoAssets.json').then(function(r){return r.json();})
+    fetch(FB_URL+ROOT+'/promoAssets.json').then(function(r){return r.json();}),
+    fetch(FB_URL+ROOT+'/checkinPhotos.json').then(function(r){return r.json();})
   ]).then(function(res){
     people = res[0]||{};
     snapshots = res[1]||{};
@@ -1053,6 +1058,7 @@ function boot(){
     Object.values(campaignMetaRaw).forEach(function(m){ if(m && m.tag) campaignMeta[m.tag] = m; });
     rollingLetters = res[15]||{};
     promoAssets = res[16]||{};
+    checkinPhotos = res[17]||{};
     if(res[8]){
       surveyTemplate = res[8];
       // 라벨·기준값은 절대 건드리지 않고, 필드id가 일치하는데 S/W 태그가 비어있는 곳만 조용히 채워넣음
@@ -3805,6 +3811,13 @@ function buildProfileHtml(empId, p){
       +'<button class="btn" onclick="copyOfficeAddress(\''+empId+'\')">복사</button>'
       +'<button class="btn" onclick="saveOfficeAddress(\''+empId+'\')">저장</button>'
     +'</div></div>'
+  +'<div style="margin:10px 0;">'
+    +'<label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">📸 인증샷 <span style="color:var(--dim);">(현장 방문 사진 — 본부별로 자동 정리돼요)</span></label>'
+    +'<input type="file" id="checkin-photo-input-'+empId+'" accept="image/*" capture="environment" style="display:none;" onchange="uploadCheckinPhoto(\''+empId+'\')">'
+    +'<button class="btn" onclick="document.getElementById(\'checkin-photo-input-'+empId+'\').click()">📷 촬영/업로드</button>'
+    +' <span id="checkin-photo-status-'+empId+'" style="font-size:11px;color:var(--muted);"></span>'
+    +'<div id="checkin-photo-gallery-'+empId+'" style="margin-top:8px;">'+buildCheckinPhotoGalleryHtml(empId)+'</div>'
+  +'</div>'
   + buildScheduleHistoryHtml(empId)
   +'<div class="metric-grid">'
     +metricCell('Seg', p.seg)+metricCell('C/R', p.cr)+metricCell('eFSR', p.efsr)+metricCell('PSP', p.psp)
@@ -6195,7 +6208,66 @@ function applyPromoAssetToGsms(){
   var insertText = a.title+'\n\n'+a.content+'\n';
   textEl.value = textEl.value.trim() ? (textEl.value+'\n\n'+insertText) : insertText;
 }
-/* ---------- 프로모션 자료함 (본부/지점별 사진링크·텍스트) ---------- */
+/* ---------- 인증샷 (Cloudinary 업로드, 본부별 폴더 자동 정리) ---------- */
+function cloudinaryThumb(url, size){
+  size = size || 100;
+  return url.replace('/upload/', '/upload/w_'+size+',h_'+size+',c_fill,q_auto,f_auto/');
+}
+function uploadCheckinPhoto(empId){
+  var fileInput = document.getElementById('checkin-photo-input-'+empId);
+  if(!fileInput || !fileInput.files || !fileInput.files[0]) return;
+  var file = fileInput.files[0];
+  var p = people[empId];
+  if(!p) return;
+  var statusEl = document.getElementById('checkin-photo-status-'+empId);
+  if(statusEl) statusEl.textContent = '업로드 중...';
+  var folder = 'eFSR면담/' + (p.hq || '미분류');
+  var formData = new FormData();
+  formData.append('file', file);
+  formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+  formData.append('folder', folder);
+  fetch('https://api.cloudinary.com/v1_1/'+CLOUDINARY_CLOUD_NAME+'/image/upload', { method:'POST', body: formData })
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      if(!data.secure_url){ throw new Error((data.error&&data.error.message)||'업로드 실패'); }
+      var photoId = 'ph'+Date.now();
+      var entry = { url: data.secure_url, publicId: data.public_id||null, hq: p.hq||null, branch: p.branch||null, uploadedAt: new Date().toISOString() };
+      fetch(FB_URL+ROOT+'/checkinPhotos/'+empId+'/'+photoId+'.json', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(entry)});
+      if(!checkinPhotos[empId]) checkinPhotos[empId] = {};
+      checkinPhotos[empId][photoId] = entry;
+      if(statusEl) statusEl.textContent = '';
+      showToast('인증샷 업로드 완료!');
+      renderCheckinPhotoGallery(empId);
+      fileInput.value = '';
+    })
+    .catch(function(err){
+      if(statusEl) statusEl.textContent = '';
+      showToast('업로드 실패: '+err.message);
+    });
+}
+function deleteCheckinPhotoRef(empId, photoId){
+  if(!confirm('이 사진을 목록에서 삭제할까요? (Cloudinary 원본 파일은 그대로 남아있어요, 목록에서만 빠져요)')) return;
+  fetch(FB_URL+ROOT+'/checkinPhotos/'+empId+'/'+photoId+'.json', {method:'DELETE'});
+  if(checkinPhotos[empId]) delete checkinPhotos[empId][photoId];
+  renderCheckinPhotoGallery(empId);
+}
+function buildCheckinPhotoGalleryHtml(empId){
+  var photos = checkinPhotos[empId] || {};
+  var ids = Object.keys(photos).sort(function(a,b){ return (photos[b].uploadedAt||'').localeCompare(photos[a].uploadedAt||''); });
+  if(!ids.length) return '<div class="empty" style="font-size:11px;">아직 업로드된 인증샷이 없어요.</div>';
+  return ids.map(function(id){
+    var ph = photos[id];
+    return '<div style="position:relative;display:inline-block;margin:0 6px 6px 0;">'
+      +'<a href="'+ph.url+'" target="_blank" title="클릭하면 원본 새 탭에서 열림(다운로드 가능)"><img src="'+cloudinaryThumb(ph.url,90)+'" style="width:90px;height:90px;object-fit:cover;border-radius:8px;border:1px solid var(--bd);display:block;"></a>'
+      +'<span onclick="deleteCheckinPhotoRef(\''+empId+'\',\''+id+'\')" style="position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;">✕</span>'
+    +'</div>';
+  }).join('');
+}
+function renderCheckinPhotoGallery(empId){
+  var el = document.getElementById('checkin-photo-gallery-'+empId);
+  if(!el) return;
+  el.innerHTML = buildCheckinPhotoGalleryHtml(empId);
+}
 // 지점 고르면 본부를 자동으로 채워줌 (발송 대상 범위는 그대로 "그 지점만" — 나중에 본부 단위로 집계 합산할 때 정확히 묶이도록 하기 위함)
 function onPromoBranchAutoPair(){
   var brEl = document.getElementById('promo-branch');
@@ -6396,6 +6468,13 @@ function getHqColorMap(){
   return _hqColorMap;
 }
 var _mapHqFilter = null; // null=아직 초기화 전(전체 표시), Set으로 채워지면 그 본부만 표시
+var _mapShowAllPhotos = false; // true면 호버 안 해도 인증샷 있는 모든 핀 위에 사진이 항상 떠 있음
+function toggleShowAllPhotos(){
+  _mapShowAllPhotos = !_mapShowAllPhotos;
+  var btn = document.getElementById('map-show-all-photos-btn');
+  if(btn) btn.classList.toggle('primary', _mapShowAllPhotos);
+  renderMap();
+}
 function renderMapHqFilter(){
   var el = document.getElementById('map-hq-filter');
   if(!el) return;
@@ -6448,13 +6527,34 @@ function renderMap(){
       var pos = new kakao.maps.LatLng(p.officeLat, p.officeLng);
       var col = colorMap[p.hq] || '#888';
       var isVisited = p.chk1 && p.chk2;
+      var photos = checkinPhotos[id];
+      var photoIds = photos ? Object.keys(photos).sort(function(a,b){ return (photos[b].uploadedAt||'').localeCompare(photos[a].uploadedAt||''); }) : [];
+      var hasPhoto = photoIds.length>0;
       var content = document.createElement('div');
       content.style.cursor='pointer';
-      content.innerHTML = isVisited
+      content.style.position='relative';
+      var pinHtml = isVisited
         ? '<div style="width:20px;height:20px;background:'+col+';border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);clip-path:polygon(50% 0%,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);"></div>'
         : '<div style="width:16px;height:16px;border-radius:50%;background:'+col+';border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.35);"></div>';
+      var photoBadgeHtml = hasPhoto ? '<div style="position:absolute;top:-6px;right:-6px;background:#fff;border-radius:50%;width:13px;height:13px;display:flex;align-items:center;justify-content:center;font-size:8px;box-shadow:0 1px 3px rgba(0,0,0,0.4);">📷</div>' : '';
+      content.innerHTML = pinHtml + photoBadgeHtml;
       var overlay = new kakao.maps.CustomOverlay({ position:pos, content:content, yAnchor:0.5, xAnchor:0.5 });
       overlay.setMap(_mapInstance);
+      // 인증샷이 있으면 마커에 마우스 올렸을 때(또는 "사진 모두 보기" 켜져있으면 항상) 최근 사진이 말풍선처럼 떠요
+      var hoverOverlay = null;
+      if(hasPhoto){
+        var latestPhoto = photos[photoIds[0]];
+        var hoverContent = document.createElement('div');
+        hoverContent.innerHTML = '<img src="'+cloudinaryThumb(latestPhoto.url,120)+'" style="width:120px;height:120px;object-fit:cover;border-radius:8px;border:3px solid #fff;box-shadow:0 3px 12px rgba(0,0,0,0.35);">';
+        hoverOverlay = new kakao.maps.CustomOverlay({ position:pos, content:hoverContent, yAnchor:1.5, xAnchor:0.5, zIndex:999 });
+        _mapMarkers.push(hoverOverlay);
+        if(_mapShowAllPhotos){
+          hoverOverlay.setMap(_mapInstance);
+        } else {
+          content.addEventListener('mouseenter', function(){ hoverOverlay.setMap(_mapInstance); });
+          content.addEventListener('mouseleave', function(){ hoverOverlay.setMap(null); });
+        }
+      }
       content.addEventListener('click', function(){
         if(_routePickMode){
           var periodEl = document.getElementById('route-period-select');
