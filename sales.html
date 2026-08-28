@@ -6520,7 +6520,7 @@ function setAllMapHqFilter(on){
   renderMapHqFilter();
   renderMap();
 }
-function renderMap(){
+function renderMap(skipBounds){
   var statusEl = document.getElementById('map-geo-status');
   loadKakaoMapSdk(function(){
     renderMapHqFilter();
@@ -6532,8 +6532,9 @@ function renderMap(){
       var _zoomRedrawTimer = null;
       kakao.maps.event.addListener(_mapInstance, 'zoom_changed', function(){
         // 사진 크기만 CSS로 바꾸면 카카오맵 내부의 "핀 기준 위치 계산"이 안 맞아서 엉뚱한 곳에 뜸 → 줌 바뀌면 그 시점 크기로 통째로 다시 그림
+        // (skipBounds=true로 불러야 함 — 안 그러면 다시 그릴 때마다 전체보기로 확대/축소가 리셋돼버림)
         clearTimeout(_zoomRedrawTimer);
-        _zoomRedrawTimer = setTimeout(function(){ renderMap(); }, 150);
+        _zoomRedrawTimer = setTimeout(function(){ renderMap(true); }, 150);
       });
       _mapZoomListenerRegistered = true;
     }
@@ -6605,7 +6606,7 @@ function renderMap(){
       _mapMarkers.push(overlay);
       bounds.extend(pos);
     });
-    _mapInstance.setBounds(bounds);
+    if(!skipBounds) _mapInstance.setBounds(bounds);
   });
 }
 
