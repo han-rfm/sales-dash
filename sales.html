@@ -218,8 +218,13 @@ tr.row-clickable:hover{background:var(--sf2);}
         <div style="border-top:1px solid var(--bd);margin-top:12px;padding-top:12px;">
           <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">📸 방문 인증샷 업로드 현황</div>
           <div class="energy-bar-wrap" style="position:relative;">
+            <div id="photo-rate-fill-assumed" style="position:absolute;left:0;top:0;height:100%;width:0%;background:repeating-linear-gradient(45deg,#e8b8dc 0 6px,#f3d6ec 6px 12px);border-radius:8px;transition:width .3s;"></div>
             <div id="photo-rate-fill" style="position:absolute;left:0;top:0;height:100%;width:0%;background:linear-gradient(90deg,#ec1f8f,#a24bd8);border-radius:8px;transition:width .3s;"></div>
             <span id="photo-rate-pct" style="position:absolute;top:50%;transform:translate(-100%,-50%);font-size:10.5px;font-weight:700;color:#fff;padding-right:6px;white-space:nowrap;"></span>
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:10.5px;color:var(--muted);margin-top:6px;">
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:linear-gradient(90deg,#ec1f8f,#a24bd8);vertical-align:middle;margin-right:4px;"></span>사진 업로드</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:repeating-linear-gradient(45deg,#e8b8dc 0 3px,#f3d6ec 3px 6px);vertical-align:middle;margin-right:4px;"></span>지도 미표시·주소 못찾음 (만남 간주)</span>
           </div>
           <div style="font-size:12px;color:var(--muted);margin-top:6px;" id="photo-rate-label">-</div>
         </div>
@@ -2479,20 +2484,32 @@ function renderSurveyRate(ids){
 function renderPhotoUploadRate(ids){
   ids = ids || Object.keys(people);
   var activeIds = ids.filter(function(id){ var p=people[id]; return p && !p.terminated && !p.terminationCandidate; });
+  var activeSet = {}; activeIds.forEach(function(id){ activeSet[id]=true; });
   var photoIds = ids.filter(function(id){ return checkinPhotos[id] && Object.keys(checkinPhotos[id]).length>0; });
-  var photoActive = photoIds.filter(function(id){ return activeIds.indexOf(id)>-1; });
+  var photoActive = photoIds.filter(function(id){ return activeSet[id]; });
+  var photoSet = {}; photoActive.forEach(function(id){ photoSet[id]=true; });
+  // ⚠ 대시보드 집계에서만: 지도에 없는 서베이 응답자 + 주소 못 찾는 사람은 "만난 것(사진 업로드)"으로 간주해서 합산 (정훈님 요청, 2026-10)
+  //   지도·프로필·방문완료 체크 등 실제 데이터는 바꾸지 않음
+  var assumedSet = {};
+  surveyRespondentsWithoutPin().concat(noCoordPeopleIds()).forEach(function(id){ if(activeSet[id] && !photoSet[id]) assumedSet[id]=true; });
+  var assumedCount = Object.keys(assumedSet).length;
+  var metCount = photoActive.length + assumedCount;
   var totalPhotos = photoIds.reduce(function(s,id){ return s+Object.keys(checkinPhotos[id]).length; },0);
   var visitedCount = activeIds.filter(function(id){ return people[id].chk1 && people[id].chk2; }).length;
-  var pct = activeIds.length ? Math.round(photoActive.length/activeIds.length*100) : 0;
+  var den = activeIds.length;
+  var pctPhoto = den ? Math.round(photoActive.length/den*100) : 0;
+  var pct = den ? Math.round(metCount/den*100) : 0;
   var fillEl = document.getElementById('photo-rate-fill');
-  if(fillEl) fillEl.style.width = pct+'%';
+  if(fillEl) fillEl.style.width = pctPhoto+'%';
+  var fillA = document.getElementById('photo-rate-fill-assumed');
+  if(fillA) fillA.style.width = pct+'%';
   var pctEl = document.getElementById('photo-rate-pct');
-  if(pctEl){ pctEl.style.left = pct+'%'; pctEl.textContent = pct>=8 ? pct+'%' : ''; }
+  if(pctEl){ pctEl.style.left = pct+'%'; pctEl.style.color = assumedCount ? '#8a1f6a' : '#fff'; pctEl.textContent = pct>=8 ? pct+'%' : ''; }
   var labelEl = document.getElementById('photo-rate-label');
   if(labelEl){
     var extra = photoIds.length - photoActive.length;
-    labelEl.textContent = photoActive.length+' / '+activeIds.length+'명 업로드 ('+pct+'%) · 총 '+totalPhotos+'장'
-      + ' · 방문완료 체크 '+visitedCount+'명'
+    labelEl.textContent = metCount+' / '+den+'명 만남 ('+pct+'%) = 사진 업로드 '+photoActive.length+'명 + 지도 미표시·주소 못찾음 '+assumedCount+'명'
+      + ' · 총 '+totalPhotos+'장 · 방문완료 체크 '+visitedCount+'명'
       + (extra>0 ? ' · (해촉·소통불가 중 업로드 '+extra+'명 별도)' : '');
   }
 }
@@ -6913,6 +6930,7 @@ function renderMap(skipBounds){
     var surveyNoPinCount = surveyRespondentsWithoutPin().length;
     if(statusEl) statusEl.innerHTML = withCoord.length+'명 표시 중'+({unvisited:' (● 미방문만)',visited:' (★ 방문완료만)'}[_mapVisitFilter]||'')+(noAddrCount?' · <span onclick="openNoCoordList()" style="color:var(--danger);text-decoration:underline;cursor:pointer;">좌표 없는 주소 '+noAddrCount+'건 보기</span>':'')
       +(surveyNoPinCount?' · <span onclick="openSurveyNoPinList()" style="color:#8a5a00;text-decoration:underline;cursor:pointer;">지도에 없는 서베이 응답자 '+surveyNoPinCount+'명</span>':'');
+    renderPhotoUploadRate(); // 지도 상태가 바뀌면 대시보드 '만남' 집계도 같이 갱신
     if(!withCoord.length) return;
     var bounds = new kakao.maps.LatLngBounds();
     withCoord.forEach(function(id){
