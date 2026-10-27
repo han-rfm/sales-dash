@@ -2486,13 +2486,15 @@ function renderPhotoUploadRate(ids){
   var activeIds = ids.filter(function(id){ var p=people[id]; return p && !p.terminated && !p.terminationCandidate; });
   var activeSet = {}; activeIds.forEach(function(id){ activeSet[id]=true; });
   var photoIds = ids.filter(function(id){ return checkinPhotos[id] && Object.keys(checkinPhotos[id]).length>0; });
-  var photoActive = photoIds.filter(function(id){ return activeSet[id]; });
-  var photoSet = {}; photoActive.forEach(function(id){ photoSet[id]=true; });
+  var photoActiveAll = photoIds.filter(function(id){ return activeSet[id]; });
   // ⚠ 대시보드 집계에서만: 지도에 없는 서베이 응답자 + 주소 못 찾는 사람은 "만난 것(사진 업로드)"으로 간주해서 합산 (정훈님 요청, 2026-10)
   //   지도·프로필·방문완료 체크 등 실제 데이터는 바꾸지 않음
+  //   지도 상단 두 목록(좌표 없는 주소 + 주소 미입력 서베이 응답자)과 숫자가 정확히 같도록, 그 사람들은 사진 여부와 무관하게 이쪽으로 셈
+  //   (두 목록은 서로 겹치지 않고, 둘 다 해촉·소통불가 제외 기준)
   var assumedSet = {};
-  surveyRespondentsWithoutPin().concat(noCoordPeopleIds()).forEach(function(id){ if(activeSet[id] && !photoSet[id]) assumedSet[id]=true; });
+  surveyRespondentsWithoutPin().concat(noCoordPeopleIds()).forEach(function(id){ if(activeSet[id]) assumedSet[id]=true; });
   var assumedCount = Object.keys(assumedSet).length;
+  var photoActive = photoActiveAll.filter(function(id){ return !assumedSet[id]; });
   var metCount = photoActive.length + assumedCount;
   var totalPhotos = photoIds.reduce(function(s,id){ return s+Object.keys(checkinPhotos[id]).length; },0);
   var visitedCount = activeIds.filter(function(id){ return people[id].chk1 && people[id].chk2; }).length;
@@ -2507,7 +2509,7 @@ function renderPhotoUploadRate(ids){
   if(pctEl){ pctEl.style.left = pct+'%'; pctEl.style.color = assumedCount ? '#8a1f6a' : '#fff'; pctEl.textContent = pct>=8 ? pct+'%' : ''; }
   var labelEl = document.getElementById('photo-rate-label');
   if(labelEl){
-    var extra = photoIds.length - photoActive.length;
+    var extra = photoIds.length - photoActiveAll.length;
     labelEl.textContent = metCount+' / '+den+'명 만남 ('+pct+'%) = 사진 업로드 '+photoActive.length+'명 + 지도 미표시·주소 못찾음 '+assumedCount+'명'
       + ' · 총 '+totalPhotos+'장 · 방문완료 체크 '+visitedCount+'명'
       + (extra>0 ? ' · (해촉·소통불가 중 업로드 '+extra+'명 별도)' : '');
