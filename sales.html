@@ -413,6 +413,11 @@ tr.row-clickable:hover{background:var(--sf2);}
         <button class="btn" onclick="importOfficeAddrFromSurvey()">📥 서베이에서 주소 가져오기</button>
         <button class="btn" onclick="geocodeAllPeople()">📍 좌표 일괄 갱신</button>
         <button class="btn" id="map-show-all-photos-btn" onclick="toggleShowAllPhotos()">🖼 사진 모두 보기</button>
+        <span style="display:inline-flex;border:1px solid var(--bd);border-radius:8px;overflow:hidden;align-self:center;">
+          <button class="btn primary" id="map-visit-all" onclick="setMapVisitFilter('all')" style="border:none;border-radius:0;font-size:12px;">전체</button>
+          <button class="btn" id="map-visit-unvisited" onclick="setMapVisitFilter('unvisited')" style="border:none;border-radius:0;font-size:12px;">● 미방문만</button>
+          <button class="btn" id="map-visit-visited" onclick="setMapVisitFilter('visited')" style="border:none;border-radius:0;font-size:12px;">★ 방문완료만</button>
+        </span>
         <span id="map-geo-status" style="font-size:12px;color:var(--muted);align-self:center;"></span>
       </div>
       <div id="map-hq-filter" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;"></div>
@@ -1207,7 +1212,8 @@ function renderDashboard(){
     (terminatedIds.length||termCandidateIds.length)
       ? ((terminatedIds.length?'<span style="cursor:pointer;text-decoration:underline;" onclick="showStatDetail(\'terminatedAll\')">해촉 '+terminatedIds.length+'</span>':'')
         + (terminatedIds.length&&termCandidateIds.length?' · ':'')
-        + (termCandidateIds.length?'<span style="cursor:pointer;text-decoration:underline;" onclick="showStatDetail(\'termCandidate\')">소통불가 '+termCandidateIds.length+'</span>':''))
+        + (termCandidateIds.length?'<span style="cursor:pointer;text-decoration:underline;" onclick="showStatDetail(\'termCandidate\')">소통불가 '+termCandidateIds.length+'</span>':'')
+        + ' <span style="cursor:pointer;color:var(--accent);" title="해촉·소통불가 명단 엑셀 다운로드" onclick="exportTerminatedListExcel()">📥</span>')
       : '';
   var declinedIds = ids.filter(function(id){ return swTrend(id).declined; });
   var improvedIds = ids.filter(function(id){ return swTrend(id).improved; });
@@ -1236,9 +1242,12 @@ function renderDashboard(){
   var netCum = cumNewIds.length - cumOutIds.length;
   function netHtml(n){ return '<span style="font-size:14px;font-weight:700;color:'+(n>0?'var(--good)':(n<0?'var(--danger)':'var(--muted)'))+';">'+(n>0?'+':(n<0?'':'±'))+n+'</span>'; }
   var totalEl = document.getElementById('d-total');
-  totalEl.innerHTML = totalEl.innerHTML.replace(/^(\d+)/, '$1 '+netHtml(netMonth));
+  // 전체 인원 = 현재 실제 재적(해촉자 제외). 시작 인원(26.08) = 현재 재적 + 누적해촉 − 누적위촉 으로 역산 → 시작 대비 순증 표시
+  var currentCount = ids.length - terminatedIds.length;
+  var startCount = currentCount + cumOutIds.length - cumNewIds.length;
+  totalEl.innerHTML = totalEl.innerHTML.replace(/^(\d+)/, currentCount+' '+netHtml(netCum));
   document.getElementById('d-total-breakdown').innerHTML += (document.getElementById('d-total-breakdown').innerHTML?'<br>':'')
-    + '이번달 '+(netMonth>0?'+':'')+netMonth+'명 · 누적('+cumLabel+') '+(netCum>0?'+':'')+netCum+'명';
+    + '시작 '+startCount+'명('+cumLabel.replace('~','')+') 대비 '+(netCum>0?'+':'')+netCum+'명 · 이번달 '+(netMonth>0?'+':'')+netMonth+'명';
   document.getElementById('d-new-cum').textContent = cumNewIds.length;
   document.getElementById('d-out-cum').textContent = cumOutIds.length;
   document.getElementById('d-cum-label-new').textContent = '('+cumLabel+')';
@@ -2212,6 +2221,7 @@ function showStatDetail(type){
   }
   box.innerHTML = '<button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button>'
     +'<div class="card-title">'+titleMap[type]+' ('+ids.length+'명)</div>'
+    +((type==='terminatedAll'||type==='termCandidate'||type==='out'||type==='cumOut')&&ids.length ? '<button class="btn" style="font-size:11px;padding:5px 10px;margin-bottom:8px;" onclick="exportTerminatedListExcel()">📥 해촉·소통불가 명단 엑셀</button>' : '')
     +'<div style="max-height:60vh;overflow-y:auto;">'+listHtml+'</div>';
   overlay.appendChild(box);
   document.body.appendChild(overlay);
@@ -3135,6 +3145,35 @@ function renderOrgList(){
       +'<td>'+trendBadgeHtml(r.id)+'</td>'
       +'</tr>';
   }).join('');
+}
+// 해촉자 + 소통불가자 명단 엑셀 (한 시트, '구분' 열로 구분 / 해촉 먼저, 처리일 최신순)
+function exportTerminatedListExcel(){
+  var rows = [];
+  Object.keys(people).forEach(function(id){
+    var p = people[id];
+    var kind = p.terminated ? '해촉' : (p.terminationCandidate ? '소통불가' : null);
+    if(!kind) return;
+    var cStats = allContactStats(id);
+    var surveyDone = !!(surveyResponses[id] && Object.keys(surveyResponses[id]).length>0);
+    var surveySent = lastSurveyLinkSentDate(id);
+    rows.push({
+      kind: kind,
+      date: String((kind==='해촉' ? p.terminatedAt : p.terminationCandidateAt) || ''),
+      cols: [kind, fmtDate8(kind==='해촉' ? p.terminatedAt : p.terminationCandidateAt), p.name||'', p.empId||id, p.hq||'', p.branch||'', p.position||'',
+        p.phone||'', p.fm||'', fmtDate8(p.joinDate), p.seg||'', p.cr||'', cStats.latest||'-', cStats.count||0,
+        surveyDone?'제출':(surveySent?'발송함(미제출)':'미발송'), (p.chk1&&p.chk2)?'O':'', (p.tags||[]).join(', '), p.rfmInsight||'']
+    });
+  });
+  if(!rows.length){ showToast('해촉·소통불가 인원이 없어요.'); return; }
+  rows.sort(function(a,b){ return (a.kind===b.kind ? 0 : (a.kind==='해촉'?-1:1)) || b.date.localeCompare(a.date); });
+  var aoa = [['구분','처리일','이름','사번','본부','지점','직책','전화번호','담당FM','위촉일자','Seg','C/R','최근 컨택','총 컨택횟수','서베이','방문완료','태그','rFM 인사이트']]
+    .concat(rows.map(function(r){ return r.cols; }));
+  var ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:8},{wch:11},{wch:10},{wch:11},{wch:10},{wch:14},{wch:8},{wch:13},{wch:10},{wch:11},{wch:5},{wch:5},{wch:11},{wch:9},{wch:13},{wch:8},{wch:16},{wch:40}];
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '해촉·소통불가');
+  var now = new Date();
+  XLSX.writeFile(wb, '해촉_소통불가_명단_'+now.getFullYear()+pad2(now.getMonth()+1)+pad2(now.getDate())+'.xlsx');
 }
 function exportOrgListExcel(){
   var rows = getOrgRows();
@@ -6737,6 +6776,13 @@ function getHqColorMap(){
   return _hqColorMap;
 }
 var _mapHqFilter = null; // null=아직 초기화 전(전체 표시), Set으로 채워지면 그 본부만 표시
+// 지도 방문상태 필터: 'all' | 'unvisited'(●, 아직 별로 안 바뀐 곳) | 'visited'(★ 방문완료=체크2개, 인증샷 올리면 자동)
+var _mapVisitFilter = 'all';
+function setMapVisitFilter(v){
+  _mapVisitFilter = v;
+  ['all','unvisited','visited'].forEach(function(k){ var b=document.getElementById('map-visit-'+k); if(b) b.classList.toggle('primary', k===v); });
+  renderMap();
+}
 var _mapShowAllPhotos = false; // true면 호버 안 해도 인증샷 있는 모든 핀 위에 사진이 항상 떠 있음
 function toggleShowAllPhotos(){
   _mapShowAllPhotos = !_mapShowAllPhotos;
@@ -6796,10 +6842,13 @@ function renderMap(skipBounds){
       var p=people[id];
       if(!(p.officeLat && p.officeLng)) return false;
       if(_mapHqFilter && !_mapHqFilter.has(p.hq)) return false;
+      var visited = !!(p.chk1 && p.chk2);
+      if(_mapVisitFilter==='unvisited' && visited) return false;
+      if(_mapVisitFilter==='visited' && !visited) return false;
       return true;
     });
     var noAddrCount = Object.keys(people).filter(function(id){ var p=people[id]; return p.officeAddress && (!p.officeLat||!p.officeLng); }).length;
-    if(statusEl) statusEl.innerHTML = withCoord.length+'명 표시 중'+(noAddrCount?' · <span onclick="openNoCoordList()" style="color:var(--danger);text-decoration:underline;cursor:pointer;">좌표 없는 주소 '+noAddrCount+'건 보기</span>':'');
+    if(statusEl) statusEl.innerHTML = withCoord.length+'명 표시 중'+({unvisited:' (● 미방문만)',visited:' (★ 방문완료만)'}[_mapVisitFilter]||'')+(noAddrCount?' · <span onclick="openNoCoordList()" style="color:var(--danger);text-decoration:underline;cursor:pointer;">좌표 없는 주소 '+noAddrCount+'건 보기</span>':'');
     if(!withCoord.length) return;
     var bounds = new kakao.maps.LatLngBounds();
     withCoord.forEach(function(id){
