@@ -2515,6 +2515,52 @@ function renderPhotoUploadRate(ids){
       + (extra>0 ? ' · (해촉·소통불가 중 업로드 '+extra+'명 별도)' : '');
   }
 }
+// 서베이 미응답자(해촉·소통불가 제외) 엑셀 — 시트1: 본부·지점별 요약, 시트2: 본부→지점→이름 순 명단
+function exportSurveyPendingExcel(){
+  var active = Object.keys(people).filter(function(id){ var p=people[id]; return !p.terminated && !p.terminationCandidate; });
+  function submitted(id){ return !!(surveyResponses[id] && Object.keys(surveyResponses[id]).length>0); }
+  var pending = active.filter(function(id){ return !submitted(id); });
+  if(!pending.length){ showToast('미응답자가 없어요.'); return; }
+  var byOrg = {};
+  active.forEach(function(id){
+    var p = people[id], k = (p.hq||'미분류')+'|'+(p.branch||'미분류');
+    if(!byOrg[k]) byOrg[k] = {hq:p.hq||'미분류', branch:p.branch||'미분류', total:0, pending:0, sent:0};
+    byOrg[k].total++;
+    if(!submitted(id)){ byOrg[k].pending++; if(lastSurveyLinkSentDate(id)) byOrg[k].sent++; }
+  });
+  var orgRows = Object.values(byOrg).filter(function(o){ return o.pending>0; })
+    .sort(function(a,b){ return a.hq.localeCompare(b.hq) || b.pending-a.pending || a.branch.localeCompare(b.branch); });
+  var summary = [['본부','지점','미응답','(발송함)','(미발송)','활성 인원','응답률']];
+  var hqTotals = {};
+  orgRows.forEach(function(o){
+    summary.push([o.hq, o.branch, o.pending, o.sent, o.pending-o.sent, o.total, Math.round((o.total-o.pending)/o.total*100)+'%']);
+    if(!hqTotals[o.hq]) hqTotals[o.hq]={pending:0,total:0};
+    hqTotals[o.hq].pending += o.pending;
+  });
+  active.forEach(function(id){ var h=people[id].hq||'미분류'; if(hqTotals[h]) hqTotals[h].total++; });
+  summary.push([]);
+  summary.push(['본부 합계','','미응답','','','활성 인원','응답률']);
+  Object.keys(hqTotals).sort().forEach(function(h){ var t=hqTotals[h]; summary.push([h,'',t.pending,'','',t.total,Math.round((t.total-t.pending)/t.total*100)+'%']); });
+  summary.push(['전체','',pending.length,'','',active.length,Math.round((active.length-pending.length)/active.length*100)+'%']);
+  var list = [['본부','지점','이름','사번','전화번호','담당FM','담당AM','발송상태','최근 발송일','최근 컨택']];
+  pending.slice().sort(function(a,b){
+    var pa=people[a], pb=people[b];
+    return (pa.hq||'').localeCompare(pb.hq||'') || (pa.branch||'').localeCompare(pb.branch||'') || (pa.name||'').localeCompare(pb.name||'');
+  }).forEach(function(id){
+    var p = people[id], sent = lastSurveyLinkSentDate(id);
+    list.push([p.hq||'', p.branch||'', p.name||'', p.empId||id, p.phone||'', p.fm||'', omName(orgMap.branch[p.branch])||'',
+      sent?'발송함(미제출)':'미발송', sent||'', allContactStats(id).latest||'']);
+  });
+  var wb = XLSX.utils.book_new();
+  var ws1 = XLSX.utils.aoa_to_sheet(summary);
+  ws1['!cols'] = [{wch:12},{wch:16},{wch:8},{wch:9},{wch:9},{wch:10},{wch:8}];
+  var ws2 = XLSX.utils.aoa_to_sheet(list);
+  ws2['!cols'] = [{wch:12},{wch:16},{wch:10},{wch:11},{wch:14},{wch:10},{wch:10},{wch:14},{wch:12},{wch:12}];
+  XLSX.utils.book_append_sheet(wb, ws1, '조직별 요약');
+  XLSX.utils.book_append_sheet(wb, ws2, '미응답자 명단');
+  var now = new Date();
+  XLSX.writeFile(wb, '서베이_미응답자_'+now.getFullYear()+pad2(now.getMonth()+1)+pad2(now.getDate())+'.xlsx');
+}
 function showSurveyPending(){
   var excludedIds = Object.keys(people).filter(function(id){ var p=people[id]; return p.terminated || p.terminationCandidate; });
   var ids = Object.keys(people).filter(function(id){
@@ -2550,6 +2596,7 @@ function showSurveyPending(){
   var sentBtn = sent.length ? '<button class="btn" style="width:100%;margin-bottom:10px;color:#8a5a00;border-color:#e8c98a;" onclick="this.closest(\'.modal-overlay\').remove();sendSurveyMissingReminders('+idsToJsArray(sent)+')">🔁 발송함·미제출자 전체 재발송 ('+sent.length+'명)</button>' : '';
   box.innerHTML = '<button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button>'
     +'<div class="card-title">📋 서베이 미응답자 ('+ids.length+'명)</div>'
+    +(ids.length?'<button class="btn" style="font-size:11px;padding:5px 10px;margin-bottom:8px;" onclick="exportSurveyPendingExcel()">📥 조직별 엑셀 다운로드</button>':'')
     +(excludedIds.length ? '<div style="font-size:11px;color:var(--muted);margin-bottom:8px;">※ 해촉·소통불가자 '+excludedIds.length+'명은 집계에서 제외했어요.</div>' : '')
     + notSentBtn + sentBtn
     +'<div style="max-height:60vh;overflow-y:auto;">'+listHtml+'</div>';
