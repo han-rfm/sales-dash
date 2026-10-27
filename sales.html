@@ -6737,8 +6737,10 @@ function isValidKrCoord(p){
   var lat=Number(p.officeLat), lng=Number(p.officeLng);
   return !!(lat && lng && lat>=33 && lat<=38.7 && lng>=124.5 && lng<=131.9);
 }
+// 지도·지도 진단목록 대상: 해촉·소통불가 제외 (2026-10 요청)
+function isMapEligible(p){ return !!p && !p.terminated && !p.terminationCandidate; }
 function noCoordPeopleIds(){
-  return Object.keys(people).filter(function(id){ var p=people[id]; return p.officeAddress && !isValidKrCoord(p); })
+  return Object.keys(people).filter(function(id){ var p=people[id]; return isMapEligible(p) && p.officeAddress && !isValidKrCoord(p); })
     .sort(function(a,b){ return ((people[a].hq||'')+(people[a].branch||'')+(people[a].name||'')).localeCompare((people[b].hq||'')+(people[b].branch||'')+(people[b].name||'')); });
 }
 function openNoCoordList(){
@@ -6793,22 +6795,23 @@ function retryGeocodeOne(id, btn){
 function surveyRespondentsWithoutPin(){
   return Object.keys(people).filter(function(id){
     var p = people[id];
+    if(!isMapEligible(p)) return false;
     if(!(surveyResponses[id] && Object.keys(surveyResponses[id]).length>0)) return false;
-    return !isValidKrCoord(p);
+    // 프로필에 주소가 있는 사람은 '좌표 없는 주소' 목록에서 이미 세므로 여기선 제외 (중복 카운팅 방지)
+    return !p.officeAddress && !isValidKrCoord(p);
   });
 }
 function openSurveyNoPinList(){
   var ov = document.getElementById('surveynopin-overlay'); if(ov) ov.remove();
   var ids = surveyRespondentsWithoutPin();
-  var groups = { noAnswer:[], notImported:[], noCoord:[] };
+  var groups = { noAnswer:[], notImported:[] };
   ids.forEach(function(id){
-    var p = people[id];
-    if(p.officeAddress) groups.noCoord.push(id);
-    else if(getSurveyOfficeAddrFor(id)) groups.notImported.push(id);
+    if(getSurveyOfficeAddrFor(id)) groups.notImported.push(id);
     else groups.noAnswer.push(id);
   });
-  var respondents = Object.keys(people).filter(function(id){ return surveyResponses[id] && Object.keys(surveyResponses[id]).length>0; }).length;
-  var pins = Object.keys(people).filter(function(id){ return isValidKrCoord(people[id]); });
+  var noCoordRespondents = noCoordPeopleIds().filter(function(id){ return surveyResponses[id] && Object.keys(surveyResponses[id]).length>0; }).length;
+  var respondents = Object.keys(people).filter(function(id){ return isMapEligible(people[id]) && surveyResponses[id] && Object.keys(surveyResponses[id]).length>0; }).length;
+  var pins = Object.keys(people).filter(function(id){ return isMapEligible(people[id]) && isValidKrCoord(people[id]); });
   var pinsNonRespondent = pins.filter(function(id){ return !(surveyResponses[id] && Object.keys(surveyResponses[id]).length>0); }).length;
   function rowHtml(id, extra){
     var p = people[id];
@@ -6830,17 +6833,16 @@ function openSurveyNoPinList(){
   var box=document.createElement('div');
   box.className='modal-box'; box.style.position='relative'; box.style.maxWidth='560px';
   box.innerHTML = '<button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button>'
-    +'<div class="card-title">🗺 지도에 없는 서베이 응답자 ('+ids.length+'명)</div>'
+    +'<div class="card-title">🗺 주소 미입력 서베이 응답자 ('+ids.length+'명)</div>'
     +'<div style="font-size:11.5px;background:var(--sf2);border-radius:8px;padding:8px 10px;line-height:1.6;">'
-      +'서베이 응답자 <b>'+respondents+'명</b> − 지도에 없는 응답자 <b>'+ids.length+'명</b> = 지도에 있는 응답자 <b>'+(respondents-ids.length)+'명</b><br>'
-      +'지도 전체 핀 <b>'+pins.length+'명</b> = 응답자 '+(respondents-ids.length)+'명 + 서베이 안 냈지만 주소가 따로 입력된 사람 '+pinsNonRespondent+'명'
+      +'<span style="color:var(--muted);">※ 해촉·소통불가자는 제외한 숫자예요.</span><br>'
+      +'서베이 응답자 <b>'+respondents+'명</b> = 지도에 있음 <b>'+(respondents-ids.length-noCoordRespondents)+'명</b> + 주소 미입력 <b>'+ids.length+'명</b>(이 목록) + 주소는 있으나 위치 못찾음 <b>'+noCoordRespondents+'명</b>("좌표 없는 주소" 목록)<br>'
+      +'지도 전체 핀 <b>'+pins.length+'명</b> = 응답자 '+(respondents-ids.length-noCoordRespondents)+'명 + 서베이 안 냈지만 주소가 따로 입력된 사람 '+pinsNonRespondent+'명'
     +'</div>'
     + section('① 서베이 주소칸을 비워서 낸 사람', '주소를 직접 받아서 프로필에 입력해야 해요.', groups.noAnswer)
     + section('② 서베이에 주소는 썼는데 프로필에 아직 안 옮겨진 사람', '"서베이에서 주소 가져오기" 후 "좌표 일괄 갱신"을 누르면 지도에 나와요.', groups.notImported,
         function(id){ return String(getSurveyOfficeAddrFor(id)).replace(/</g,'&lt;'); },
-        '<button class="btn primary" style="font-size:11px;padding:5px 10px;margin-bottom:4px;" onclick="document.getElementById(\'surveynopin-overlay\').remove();importOfficeAddrFromSurvey();">📥 지금 주소 가져오기</button>')
-    + section('③ 주소는 있는데 위치를 못 찾은 사람', '주소를 도로명주소로 고쳐야 해요 (좌표 없는 주소 목록과 같은 사람들).', groups.noCoord,
-        function(id){ var p=people[id]; return String(p.officeAddress).replace(/</g,'&lt;')+((p.officeLat&&p.officeLng)?' · <b style="color:var(--danger);">위치 이상</b>':''); });
+        '<button class="btn primary" style="font-size:11px;padding:5px 10px;margin-bottom:4px;" onclick="document.getElementById(\'surveynopin-overlay\').remove();importOfficeAddrFromSurvey();">📥 지금 주소 가져오기</button>');
   overlay.appendChild(box);
   document.body.appendChild(overlay);
 }
@@ -6919,6 +6921,7 @@ function renderMap(skipBounds){
     var colorMap = getHqColorMap();
     var withCoord = Object.keys(people).filter(function(id){
       var p=people[id];
+      if(!isMapEligible(p)) return false;
       if(!isValidKrCoord(p)) return false;
       if(_mapHqFilter && !_mapHqFilter.has(p.hq)) return false;
       var visited = !!(p.chk1 && p.chk2);
@@ -6929,7 +6932,7 @@ function renderMap(skipBounds){
     var noAddrCount = noCoordPeopleIds().length;
     var surveyNoPinCount = surveyRespondentsWithoutPin().length;
     if(statusEl) statusEl.innerHTML = withCoord.length+'명 표시 중'+({unvisited:' (● 미방문만)',visited:' (★ 방문완료만)'}[_mapVisitFilter]||'')+(noAddrCount?' · <span onclick="openNoCoordList()" style="color:var(--danger);text-decoration:underline;cursor:pointer;">좌표 없는 주소 '+noAddrCount+'건 보기</span>':'')
-      +(surveyNoPinCount?' · <span onclick="openSurveyNoPinList()" style="color:#8a5a00;text-decoration:underline;cursor:pointer;">지도에 없는 서베이 응답자 '+surveyNoPinCount+'명</span>':'');
+      +(surveyNoPinCount?' · <span onclick="openSurveyNoPinList()" style="color:#8a5a00;text-decoration:underline;cursor:pointer;">주소 미입력 서베이 응답자 '+surveyNoPinCount+'명</span>':'');
     renderPhotoUploadRate(); // 지도 상태가 바뀌면 대시보드 '만남' 집계도 같이 갱신
     if(!withCoord.length) return;
     var bounds = new kakao.maps.LatLngBounds();
