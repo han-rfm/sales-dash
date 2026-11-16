@@ -2696,8 +2696,10 @@ function _surveyOrgStats(filterFn){
            pendingIds: managed.filter(function(id){ return done.indexOf(id)<0; }) };
 }
 var _surveyOrgPendingCache = {};
+var _surveyOrgScaleBase = 0; // 막대 길이 기준 = 전체 기준인원(재적−소통불가). 조직 막대 길이 = 그 조직 기준인원 ÷ 이 값
 function _surveyOrgRowHtml(label, st, opts){
   opts = opts||{};
+  var share = _surveyOrgScaleBase ? st.managed/_surveyOrgScaleBase*100 : 100; // 전체 대비 길이(%)
   var key = 'k'+Object.keys(_surveyOrgPendingCache).length;
   _surveyOrgPendingCache[key] = { label:label, ids:st.pendingIds };
   var pDone = st.managed ? Math.round(st.done/st.managed*100) : 0;
@@ -2707,8 +2709,10 @@ function _surveyOrgRowHtml(label, st, opts){
     // 지점 행은 한 줄로 압축: 지점명 | 막대 | 제출/잠재이탈
     return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0 4px 18px;border-bottom:1px dashed var(--bd);font-size:11px;">'
       +'<span style="width:110px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+label+'">'+label+' <span style="color:var(--muted);">('+st.managed+')</span></span>'
-      +'<div style="flex:1;display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--sf2);">'
-        +(st.managed?'<div style="width:'+pDone+'%;background:linear-gradient(90deg,#4361ee,#0f9d67);"></div>'+(pRisk>0?'<div style="width:'+pRisk+'%;background:#f4a340;"></div>':'')+'':'')
+      +'<div style="flex:1;height:10px;border-radius:5px;background:var(--sf2);">'
+        +'<div style="width:'+share+'%;min-width:'+(st.managed?'3px':'0')+';height:100%;display:flex;border-radius:5px;overflow:hidden;">'
+        +(st.managed?'<div style="width:'+pDone+'%;background:linear-gradient(90deg,#4361ee,#0f9d67);"></div>'+(pRisk>0?'<div style="width:'+pRisk+'%;background:#f4a340;"></div>':''):'')
+        +'</div>'
       +'</div>'
       +'<span style="width:150px;flex-shrink:0;text-align:right;white-space:nowrap;"><span style="color:var(--good);">'+st.done+'명 '+pDone+'%</span> · '
         +'<span style="color:#c06a00;'+(nRisk?'text-decoration:underline;cursor:pointer;':'')+'"'+(nRisk?' onclick="event.stopPropagation();openSurveyOrgPending(\''+key+'\')"':'')+'>⚠ '+nRisk+'명 '+pRisk+'%</span></span>'
@@ -2719,9 +2723,14 @@ function _surveyOrgRowHtml(label, st, opts){
       +'<span style="font-size:'+(opts.bold?'13':'12')+'px;font-weight:'+(opts.bold?'800':(opts.indent?'500':'700'))+';">'+(opts.caret||'')+label+'</span>'
       +'<span style="font-size:10.5px;color:var(--muted);white-space:nowrap;">재적 '+st.roster+' − 소통불가 '+st.incommunicado+' = <b style="color:var(--text);">기준 '+st.managed+'명</b></span>'
     +'</div>'
-    +'<div style="display:flex;height:'+(opts.indent?'14':'18')+'px;border-radius:6px;overflow:hidden;background:var(--sf2);">'
-      +(st.managed ? '<div style="width:'+pDone+'%;background:linear-gradient(90deg,#4361ee,#0f9d67);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:flex-end;padding-right:5px;white-space:nowrap;box-sizing:border-box;">'+(pDone>=12?pDone+'%':'')+'</div>'
-        +(pRisk>0 ? '<div style="width:'+pRisk+'%;background:#f4a340;color:#7a3e00;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:flex-end;padding-right:5px;white-space:nowrap;box-sizing:border-box;">'+(pRisk>=10?pRisk+'%':'')+'</div>' : '') : '')
+    +'<div style="display:flex;align-items:center;gap:6px;">'
+      +'<div style="flex:1;height:18px;border-radius:6px;background:var(--sf2);">'
+        +'<div style="width:'+share+'%;min-width:'+(st.managed?'4px':'0')+';height:100%;display:flex;border-radius:6px;overflow:hidden;">'
+        +(st.managed ? '<div style="width:'+pDone+'%;background:linear-gradient(90deg,#4361ee,#0f9d67);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:flex-end;padding-right:5px;white-space:nowrap;box-sizing:border-box;">'+(share*pDone/100>=9?pDone+'%':'')+'</div>'
+          +(pRisk>0 ? '<div style="width:'+pRisk+'%;background:#f4a340;color:#7a3e00;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:flex-end;padding-right:5px;white-space:nowrap;box-sizing:border-box;">'+(share*pRisk/100>=7?pRisk+'%':'')+'</div>' : '') : '')
+        +'</div>'
+      +'</div>'
+      +(opts.bold?'':'<span style="font-size:10px;color:var(--muted);width:62px;text-align:right;flex-shrink:0;">전체의 '+(Math.round(share*10)/10)+'%</span>')
     +'</div>'
     +'<div style="font-size:10.5px;margin-top:3px;display:flex;gap:10px;">'
       +'<span style="color:var(--good);">✅ 제출 '+st.done+'명 ('+pDone+'%)</span>'
@@ -2734,12 +2743,14 @@ function renderSurveyOrgBreakdown(){
   if(!el || !_surveyOrgOpen) return;
   _surveyOrgPendingCache = {};
   var hqs = [...new Set(Object.keys(people).filter(function(id){ return !people[id].terminated; }).map(function(id){ return people[id].hq||'미분류'; }))].sort();
-  var html = '<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">기준(100%) = 재적 − 소통불가 · <span style="color:var(--good);font-weight:700;">초록 = 프로파일링 성공</span> · <span style="color:#c06a00;font-weight:700;">주황 = 미제출(잠재 이탈 가능자)</span> · 본부를 누르면 지점별로 펼쳐져요</div>';
-  html += _surveyOrgRowHtml('전체', _surveyOrgStats(function(){ return true; }), {bold:true});
+  var html = '<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">기준(100%) = 재적 − 소통불가 · <span style="color:var(--good);font-weight:700;">초록 = 프로파일링 성공</span> · <span style="color:#c06a00;font-weight:700;">주황 = 미제출(잠재 이탈 가능자)</span> · 막대 길이 = 전체 기준인원 대비 그 조직 인원 비율(모든 조직 같은 자) · 본부를 누르면 지점별로 펼쳐져요</div>';
+  var allSt = _surveyOrgStats(function(){ return true; });
+  _surveyOrgScaleBase = allSt.managed;
+  html += _surveyOrgRowHtml('전체', allSt, {bold:true});
   var hqRows = hqs.map(function(hq){
     var st = _surveyOrgStats(function(p){ return (p.hq||'미분류')===hq; });
     return {hq:hq, st:st, risk: st.managed ? (st.managed-st.done)/st.managed : 0};
-  }).sort(function(a,b){ return b.risk-a.risk || a.hq.localeCompare(b.hq); }); // 잠재 이탈 비율 높은 본부가 위
+  }).sort(function(a,b){ return b.st.managed-a.st.managed || a.hq.localeCompare(b.hq); }); // 막대 길이가 비율이라 인원 많은 본부부터
   hqRows.forEach(function(r){
     var open = !!_surveyOrgOpenHq[r.hq];
     html += _surveyOrgRowHtml(r.hq, r.st, { caret:(open?'▾ ':'▸ '), onclick:"toggleSurveyOrgHq('"+String(r.hq).replace(/'/g,"\\'")+"')" });
@@ -2748,7 +2759,7 @@ function renderSurveyOrgBreakdown(){
       brs.map(function(b){
         var st = _surveyOrgStats(function(p){ return (p.hq||'미분류')===r.hq && (p.branch||'미분류')===b; });
         return {b:b, st:st, risk: st.managed ? (st.managed-st.done)/st.managed : 0};
-      }).sort(function(a,b){ return b.risk-a.risk || a.b.localeCompare(b.b); })
+      }).sort(function(a,b){ return b.st.managed-a.st.managed || a.b.localeCompare(b.b); })
         .forEach(function(x){ html += _surveyOrgRowHtml(x.b, x.st, {indent:true}); });
     }
   });
