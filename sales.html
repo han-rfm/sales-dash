@@ -276,8 +276,8 @@ tr.row-clickable:hover{background:var(--sf2);}
         </div>
 
         <div style="border-top:1px solid var(--bd);padding-top:14px;margin-top:14px;">
-          <div class="card-title" style="margin:0 0 4px;font-size:13.5px;">🏢 조직별 Reach 누적</div>
-          <p style="font-size:11px;color:var(--muted);margin-bottom:10px;">조직 필터로 정확히 보낸 것 + 예전 캠페인을 실제 수신자 소속 기준으로 역산한 것을 하나로 합쳐서 보여줘요.</p>
+          <div class="card-title" style="margin:0 0 4px;font-size:13.5px;">🏢 조직별 터치 누적 (전체 활동)</div>
+          <p style="font-size:11px;color:var(--muted);margin-bottom:10px;">정훈님이 그 조직 사람에게 한 모든 활동을 합쳐요 — 📞 전화 · 💬 문자(단체 Reach 포함) · 📝 만남메모 · 📸 인증샷 · 📋 서베이(프로파일링) · 📅 일정. 소속은 그 사람의 현재 본부/지점 기준, 해촉자도 과거 활동은 포함해요.</p>
           <div id="org-reach-stats-body"></div>
         </div>
       </div>
@@ -1819,38 +1819,91 @@ function computeOrgReachStatsRetroactive(){
     return { hq:o.hq, branch:o.branch, campaignCount:Object.keys(o.tagSet).length, reachCount:o.reachCount };
   }).sort(function(a,b){ return b.reachCount-a.reachCount; });
 }
+// 기간 = 첫 캠페인 Reach 발송일 ~ 오늘 (모든 조직 같은 기간으로 나눠서 조직 간 비교 가능하게)
+function orgReachPeriod(){
+  var first = null;
+  Object.keys(contacts).forEach(function(id){
+    Object.values(contacts[id]||{}).forEach(function(c){
+      if(!c.campaignTag || !c.date) return;
+      var d = c.date.slice(0,10);
+      if(!first || d<first) first = d;
+    });
+  });
+  if(!first) return null;
+  var a = new Date(first+'T00:00:00'), t = new Date(); t.setHours(0,0,0,0);
+  var days = Math.max(1, Math.round((t-a)/86400000)+1);
+  return { first:first, days:days, months: Math.max(1, days/30.4) };
+}
 function orgStatsTableHtml(stats){
-  return '<table style="width:100%;border-collapse:collapse;font-size:12px;">'
-    +'<tr style="border-bottom:1px solid var(--bd);color:var(--muted);font-size:10.5px;"><th style="text-align:left;padding:4px;">조직</th><th style="text-align:right;padding:4px;">캠페인 수</th><th style="text-align:right;padding:4px;">누적 Reach</th></tr>'
+  var per = orgReachPeriod();
+  function f1(v){ return (Math.round(v*10)/10).toLocaleString(); }
+  function f2(v){ return (Math.round(v*100)/100).toFixed(2); } // 일평균은 작은 값이 많아 소수 둘째자리까지
+  var totalReach = stats.reduce(function(a,s){ return a+s.reachCount; },0);
+  var totalCamp = allCampaignTags().length;
+  var th = 'style="text-align:right;padding:4px;"';
+  return (per ? '<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">집계 기간: '+per.first.replace(/-/g,'.')+' ~ 오늘 ('+per.days+'일 · 약 '+f1(per.months)+'개월) — 월평균 = 누적 ÷ 개월수, 일평균 = 누적 ÷ 일수</div>' : '')
+    +'<table style="width:100%;border-collapse:collapse;font-size:12px;">'
+    +'<tr style="border-bottom:1px solid var(--bd);color:var(--muted);font-size:10.5px;"><th style="text-align:left;padding:4px;">조직</th><th '+th+'>캠페인 수</th><th '+th+'>누적 Reach</th><th '+th+'>월평균</th><th '+th+'>일평균</th></tr>'
+    +'<tr style="border-bottom:2px solid var(--bd);background:var(--sf2);"><td style="padding:7px 4px;font-weight:800;">합계 ('+stats.length+'개 조직)</td>'
+      +'<td style="padding:7px 4px;text-align:right;color:var(--muted);">'+totalCamp+'회</td>'
+      +'<td style="padding:7px 4px;text-align:right;font-weight:800;color:var(--accent);">'+totalReach.toLocaleString()+'건</td>'
+      +'<td style="padding:7px 4px;text-align:right;font-weight:700;">'+(per?f1(totalReach/per.months)+'건':'-')+'</td>'
+      +'<td style="padding:7px 4px;text-align:right;font-weight:700;">'+(per?f2(totalReach/per.days)+'건':'-')+'</td></tr>'
     + stats.map(function(s){
         var label = s.hq + (s.branch?'/'+s.branch:'');
-        return '<tr style="border-bottom:1px solid var(--bd);"><td style="padding:6px 4px;font-weight:600;">'+label+'</td><td style="padding:6px 4px;text-align:right;color:var(--muted);">'+s.campaignCount+'회</td><td style="padding:6px 4px;text-align:right;font-weight:700;color:var(--accent);">'+s.reachCount+'건</td></tr>';
+        return '<tr style="border-bottom:1px solid var(--bd);"><td style="padding:6px 4px;font-weight:600;">'+label+'</td>'
+          +'<td style="padding:6px 4px;text-align:right;color:var(--muted);">'+s.campaignCount+'회</td>'
+          +'<td style="padding:6px 4px;text-align:right;font-weight:700;color:var(--accent);">'+s.reachCount+'건</td>'
+          +'<td style="padding:6px 4px;text-align:right;">'+(per?f1(s.reachCount/per.months):'-')+'</td>'
+          +'<td style="padding:6px 4px;text-align:right;color:var(--muted);">'+(per?f2(s.reachCount/per.days):'-')+'</td></tr>';
       }).join('')
     +'</table>';
 }
 function renderOrgReachStats(){
   var el = document.getElementById('org-reach-stats-body');
   if(!el) return;
-  var exact = computeOrgReachStats();
-  var retro = computeOrgReachStatsRetroactive();
-  if(!exact.length && !retro.length){
-    el.innerHTML = '<div class="empty" style="font-size:12px;">아직 조직 단위로 잡을 수 있는 Reach 기록이 없어요.</div>';
-    return;
+  var KINDS = [['call','📞 전화'],['sms','💬 문자'],['note','📝 메모'],['photo','📸 사진'],['survey','📋 서베이'],['sched','📅 일정']];
+  var byOrg = {}, first = null, today = localDateStr(new Date());
+  function add(id, kind, date){
+    var p = people[id]; if(!p) return; // testself·mgr 등 조직 없는 대상 제외
+    var d = date ? String(date).slice(0,10) : null;
+    if(d && d>today) return; // 미래 일정은 아직 한 활동이 아님
+    var key = (p.hq||'미분류')+'|'+(p.branch||'');
+    var o = byOrg[key] = byOrg[key] || { hq:p.hq||'미분류', branch:p.branch||'', call:0, sms:0, note:0, photo:0, survey:0, sched:0, total:0 };
+    o[kind]++; o.total++;
+    if(d && (!first || d<first)) first = d;
   }
-  // 정확 매칭 + 역산 추정을 조직(본부/지점) 기준으로 하나로 합침
-  var merged = {};
-  function addIn(list){
-    list.forEach(function(s){
-      var key = s.hq + '|' + (s.branch||'');
-      if(!merged[key]) merged[key] = { hq:s.hq, branch:s.branch, campaignCount:0, reachCount:0 };
-      merged[key].campaignCount += s.campaignCount;
-      merged[key].reachCount += s.reachCount;
-    });
+  Object.keys(contacts).forEach(function(id){ Object.values(contacts[id]||{}).forEach(function(c){ add(id, c.type==='call'?'call':'sms', c.date); }); });
+  Object.keys(notes).forEach(function(id){ Object.values(notes[id]||{}).forEach(function(n){ add(id,'note',n.date); }); });
+  Object.keys(checkinPhotos).forEach(function(id){ Object.values(checkinPhotos[id]||{}).forEach(function(x){ add(id,'photo',x.uploadedAt); }); });
+  Object.keys(surveyResponses).forEach(function(id){ Object.values(surveyResponses[id]||{}).forEach(function(r){ add(id,'survey',r.submittedAt); }); });
+  Object.values(schedules).forEach(function(sc){ if(sc && sc.empId) add(sc.empId,'sched',sc.date); });
+  var rows = Object.values(byOrg).sort(function(a,b){ return b.total-a.total; });
+  if(!rows.length){ el.innerHTML = '<div class="empty" style="font-size:12px;">아직 조직 단위 활동 기록이 없어요.</div>'; return; }
+  var t0 = new Date((first||today)+'T00:00:00'), t1 = new Date(today+'T00:00:00');
+  var days = Math.max(1, Math.round((t1-t0)/86400000)+1), months = Math.max(1, days/30.4);
+  function f1(v){ return (Math.round(v*10)/10).toLocaleString(); }
+  function f2(v){ return (Math.round(v*100)/100).toFixed(2); }
+  var sum = { call:0, sms:0, note:0, photo:0, survey:0, sched:0, total:0 };
+  rows.forEach(function(r){ Object.keys(sum).forEach(function(k){ sum[k]+=r[k]; }); });
+  var th = 'style="text-align:right;padding:4px;white-space:nowrap;"';
+  function rowHtml(label, r, isSum){
+    var td = 'padding:'+(isSum?'7':'6')+'px 4px;text-align:right;';
+    return '<tr style="border-bottom:'+(isSum?'2px':'1px')+' solid var(--bd);'+(isSum?'background:var(--sf2);':'')+'">'
+      +'<td style="padding:'+(isSum?'7':'6')+'px 4px;font-weight:'+(isSum?'800':'600')+';white-space:nowrap;">'+label+'</td>'
+      + KINDS.map(function(k){ return '<td style="'+td+'color:var(--muted);">'+(r[k[0]]||'<span style="opacity:.35;">0</span>')+'</td>'; }).join('')
+      +'<td style="'+td+'font-weight:800;color:var(--accent);">'+r.total.toLocaleString()+'건</td>'
+      +'<td style="'+td+'font-weight:'+(isSum?'700':'400')+';">'+f1(r.total/months)+'</td>'
+      +'<td style="'+td+'color:var(--muted);">'+f2(r.total/days)+'</td></tr>';
   }
-  addIn(exact);
-  addIn(retro);
-  var combined = Object.values(merged).sort(function(a,b){ return b.reachCount-a.reachCount; });
-  el.innerHTML = orgStatsTableHtml(combined);
+  el.innerHTML = '<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">집계 기간: '+(first||today).replace(/-/g,'.')+' ~ 오늘 ('+days+'일 · 약 '+f1(months)+'개월) — 월평균 = 합계 ÷ 개월수, 일평균 = 합계 ÷ 일수 · 미래 일정은 제외</div>'
+    +'<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">'
+    +'<tr style="border-bottom:1px solid var(--bd);color:var(--muted);font-size:10.5px;"><th style="text-align:left;padding:4px;">조직</th>'
+      + KINDS.map(function(k){ return '<th '+th+'>'+k[1]+'</th>'; }).join('')
+      +'<th '+th+'>합계</th><th '+th+'>월평균</th><th '+th+'>일평균</th></tr>'
+    + rowHtml('합계 ('+rows.length+'개 조직)', sum, true)
+    + rows.map(function(r){ return rowHtml(r.hq+(r.branch?'/'+r.branch:''), r, false); }).join('')
+    +'</table></div>';
 }
 var _selectedCampaignTag = null;
 // 캠페인 태그별 요약정보(제목, 최초발송일, 대상인원) 계산
@@ -2612,7 +2665,7 @@ function _surveyOrgRowHtml(label, st, opts){
     return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0 4px 18px;border-bottom:1px dashed var(--bd);font-size:11px;">'
       +'<span style="width:110px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+label+'">'+label+' <span style="color:var(--muted);">('+st.managed+')</span></span>'
       +'<div style="flex:1;display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--sf2);">'
-        +(st.managed?'<div style="width:'+pDone+'%;background:linear-gradient(90deg,#4361ee,#0f9d67);"></div><div style="width:'+pRisk+'%;background:#f4a340;"></div>':'')
+        +(st.managed?'<div style="width:'+pDone+'%;background:linear-gradient(90deg,#4361ee,#0f9d67);"></div>'+(pRisk>0?'<div style="width:'+pRisk+'%;background:#f4a340;"></div>':'')+'':'')
       +'</div>'
       +'<span style="width:150px;flex-shrink:0;text-align:right;white-space:nowrap;"><span style="color:var(--good);">'+st.done+'명 '+pDone+'%</span> · '
         +'<span style="color:#c06a00;'+(nRisk?'text-decoration:underline;cursor:pointer;':'')+'"'+(nRisk?' onclick="event.stopPropagation();openSurveyOrgPending(\''+key+'\')"':'')+'>⚠ '+nRisk+'명 '+pRisk+'%</span></span>'
@@ -2624,8 +2677,8 @@ function _surveyOrgRowHtml(label, st, opts){
       +'<span style="font-size:10.5px;color:var(--muted);white-space:nowrap;">재적 '+st.roster+' − 소통불가 '+st.incommunicado+' = <b style="color:var(--text);">기준 '+st.managed+'명</b></span>'
     +'</div>'
     +'<div style="display:flex;height:'+(opts.indent?'14':'18')+'px;border-radius:6px;overflow:hidden;background:var(--sf2);">'
-      +(st.managed ? '<div style="width:'+pDone+'%;background:linear-gradient(90deg,#4361ee,#0f9d67);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:flex-end;padding-right:5px;white-space:nowrap;">'+(pDone>=12?pDone+'%':'')+'</div>'
-        +'<div style="width:'+pRisk+'%;background:#f4a340;color:#7a3e00;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:flex-end;padding-right:5px;white-space:nowrap;">'+(pRisk>=10?pRisk+'%':'')+'</div>' : '')
+      +(st.managed ? '<div style="width:'+pDone+'%;background:linear-gradient(90deg,#4361ee,#0f9d67);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:flex-end;padding-right:5px;white-space:nowrap;box-sizing:border-box;">'+(pDone>=12?pDone+'%':'')+'</div>'
+        +(pRisk>0 ? '<div style="width:'+pRisk+'%;background:#f4a340;color:#7a3e00;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:flex-end;padding-right:5px;white-space:nowrap;box-sizing:border-box;">'+(pRisk>=10?pRisk+'%':'')+'</div>' : '') : '')
     +'</div>'
     +'<div style="font-size:10.5px;margin-top:3px;display:flex;gap:10px;">'
       +'<span style="color:var(--good);">✅ 제출 '+st.done+'명 ('+pDone+'%)</span>'
