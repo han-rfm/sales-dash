@@ -2932,6 +2932,9 @@ function renderGrid9(ids, viewYm){
   var src = viewYm ? (snapshots[viewYm]||{}) : people;
   var asOfYm = viewYm || TIP_VIDEO_DATA_END_YM;
   ids = ids.filter(function(id){ return src[id]; }); // 조회월에 데이터 없는 사람은 이 그리드에서 제외
+  // 해촉·소통불가 제외 (현재 상태 기준) — 분포%·설문응답률 모두 실관리 인원 기준으로 계산 (2026-11 요청)
+  var grid9Excluded = ids.filter(function(id){ var p=people[id]; return p && (p.terminated || p.terminationCandidate); }).length;
+  ids = ids.filter(function(id){ var p=people[id]; return !(p && (p.terminated || p.terminationCandidate)); });
   var total = ids.length;
 
   // 1) 기존 C/R 등급 그리드 — 행(세로)=숫자(1~3, 실적), 열(가로)=문자(C~A, 역량)
@@ -2952,7 +2955,7 @@ function renderGrid9(ids, viewYm){
   _grid9Data.official = officialIdMatrix;
   document.getElementById('grid9-official').innerHTML =
     render9x9GridHtml(officialMatrix, ['1(상)','2(중)','3(하)'], ['C(하)','B(중)','A(상)'], total, 'official', officialIdMatrix)
-    + '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">'+(officialUnclassified?'C/R 미기재 '+officialUnclassified+'명 제외 · ':'')+'칸 아래 📋 = 그 칸 인원 중 설문 응답자 수 · 응답률</div>';
+    + '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">'+(grid9Excluded?'해촉·소통불가 '+grid9Excluded+'명 제외 · ':'')+(officialUnclassified?'C/R 미기재 '+officialUnclassified+'명 제외 · ':'')+'칸 아래 📋 = 그 칸 인원 중 설문 응답자 수 · 응답률</div>';
 
   // 2) eFSR 확장평가 C/R — 행=실적(0=상→위, 2=하→아래), 열=활동역량(0=상이지만 오른쪽에 오도록 2-act로 반전)
   var eqTiers = computeEquityTiers(ids, src, asOfYm);
@@ -2968,7 +2971,7 @@ function renderGrid9(ids, viewYm){
   var equityClassified = Object.keys(eqTiers).length;
   document.getElementById('grid9-equity').innerHTML =
     render9x9GridHtml(equityMatrix, ['실적 상','실적 중','실적 하'], ['활동 하','활동 중','활동 상'], equityClassified, 'equity', equityIdMatrix)
-    + (total-equityClassified ? '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">데이터 부족 '+(total-equityClassified)+'명 제외</div>' : '');
+    + '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">'+(grid9Excluded?'해촉·소통불가 '+grid9Excluded+'명 제외':'')+(grid9Excluded&&(total-equityClassified)?' · ':'')+(total-equityClassified ? '데이터 부족 '+(total-equityClassified)+'명 제외' : '')+'</div>';
 
   // 3) 성장/이동현황 — "성장 기준월"이 설정돼 있으면 그 달 대비로, 없으면 직전 스냅샷월 대비로 비교
   var movementHtml = '<div style="font-size:12px;color:var(--muted);">비교할 데이터가 없어요.</div>';
