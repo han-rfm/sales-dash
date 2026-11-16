@@ -243,9 +243,16 @@ tr.row-clickable:hover{background:var(--sf2);}
             <button class="btn primary" id="reach-daily-btn-7" onclick="setReachDailyRange(7)" style="font-size:11px;padding:5px 9px;">7일</button>
             <button class="btn" id="reach-daily-btn-30" onclick="setReachDailyRange(30)" style="font-size:11px;padding:5px 9px;">30일</button>
             <button class="btn" id="reach-daily-btn-90" onclick="setReachDailyRange(90)" style="font-size:11px;padding:5px 9px;">90일</button>
+            <span style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;font-size:11px;">
+              <input type="date" id="reach-daily-from" style="font-size:11px !important;padding:3px 5px;width:auto;">
+              ~
+              <input type="date" id="reach-daily-to" style="font-size:11px !important;padding:3px 5px;width:auto;">
+              <button class="btn" id="reach-daily-btn-custom" onclick="applyReachDailyCustom()" style="font-size:11px;padding:5px 9px;">기간 적용</button>
+            </span>
           </div>
         </div>
-        <p style="font-size:11px;color:var(--muted);margin-bottom:8px;">일별로 어떤 Reach를 얼마나 했는지 <b>점수</b>로 보여줘요. 전화·문자·서베이응답은 1점, <b>만남(컨택메모) 1점</b>, <b>컨텍스케쥴(캘린더 유형="컨택") 20점</b>, <b>컨텐츠촬영 100점</b>으로 가중치를 둬서 계산돼요.</p>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:4px;">일별로 어떤 Reach를 얼마나 했는지 <b>점수</b>로 보여줘요. 전화·문자·프로파일링(서베이 제출) 1점, <b>컨텍스케쥴 = 캘린더 "컨택" 일정 20점 + 만남(컨택메모) 1점</b>, 교육·행사·본사미팅·코칭 일정 각 20점, <b>컨텐츠촬영 100점</b>. 캘린더 일정은 ETC만 빼고 전부 들어가요(여러 날 일정·반복 일정은 해당 날짜마다).</p>
+        <div id="reach-daily-summary" style="font-size:11.5px;margin-bottom:8px;"></div>
         <div style="position:relative;height:160px;margin-bottom:18px;"><canvas id="reachDailyChart"></canvas></div>
 
         <div style="border-top:1px solid var(--bd);padding-top:14px;margin-bottom:18px;">
@@ -2063,48 +2070,84 @@ function fmtDateShort(d){ // "YYYY-MM-DD" 또는 전체 ISO 타임스탬프("YYY
 }
 
 /* ---------- 일별 Reach 활동 그래프 ---------- */
-var _reachDailyRange = 7;
+var _reachDailyRange = 7;          // 7 | 30 | 90 | 'custom'
+var _reachDailyCustom = null;      // {from:'YYYY-MM-DD', to:'YYYY-MM-DD'}
 var _reachDailyChartInstance = null;
+// 차트 분류·색상·일정 가중치 (ETC 일정은 제외)
+var REACH_DAILY_TYPES = ['전화','문자','프로파일링','컨텍스케쥴','코칭','교육','행사','본사미팅','컨텐츠촬영'];
+var REACH_DAILY_COLORS = { '전화':'#4361ee','문자':'#7c9cff','프로파일링':'#0f9d67','컨텍스케쥴':'#d8306b','코칭':'#14b8a6','교육':'#c97a12','행사':'#a24bd8','본사미팅':'#8b5e3c','컨텐츠촬영':'#7c3aed' };
+var REACH_SCHED_WEIGHT = { '컨택':20, '코칭':20, '교육':20, '행사':20, '본사미팅':20, '컨텐츠촬영':100 };
 function setReachDailyRange(days){
   _reachDailyRange = days;
-  ['7','30','90'].forEach(function(d){
+  ['7','30','90','custom'].forEach(function(d){
     var btn = document.getElementById('reach-daily-btn-'+d);
-    if(btn) btn.classList.toggle('primary', Number(d)===days);
+    if(btn) btn.classList.toggle('primary', String(d)===String(days));
   });
   renderReachDailyChart();
 }
-function buildDailyReachSeries(days){
-  var log = buildActivityLog().filter(function(l){ return l.reach; });
+function applyReachDailyCustom(){
+  var f = document.getElementById('reach-daily-from').value, t = document.getElementById('reach-daily-to').value;
+  if(!f || !t){ showToast('시작일과 종료일을 모두 골라주세요.'); return; }
+  if(f>t){ var x=f; f=t; t=x; }
+  var span = Math.round((new Date(t)-new Date(f))/86400000)+1;
+  if(span>370){ showToast('기간은 최대 1년까지 볼 수 있어요.'); return; }
+  _reachDailyCustom = {from:f, to:t};
+  setReachDailyRange('custom');
+}
+function buildDailyReachSeries(range){
   var today = new Date();
-  var todayKey = today.getFullYear()+'-'+pad2(today.getMonth()+1)+'-'+pad2(today.getDate());
+  var todayKey = localDateStr(today);
   var dayKeys = [];
-  // 7일 보기일 땐 오늘을 정가운데(4번째)로 오도록 -3일~+3일 범위로. 그 외(30/90일)는 기존처럼 오늘까지의 지난 N일.
-  var startOffset = days===7 ? -3 : -(days-1);
-  var endOffset = days===7 ? 3 : 0;
-  for(var i=startOffset;i<=endOffset;i++){
-    var d = new Date(today.getFullYear(), today.getMonth(), today.getDate()+i);
-    dayKeys.push(d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()));
+  if(range==='custom' && _reachDailyCustom){
+    var d0 = new Date(_reachDailyCustom.from+'T00:00:00'), d1 = new Date(_reachDailyCustom.to+'T00:00:00');
+    for(var d=new Date(d0); d<=d1; d.setDate(d.getDate()+1)) dayKeys.push(localDateStr(d));
+  } else {
+    var days = Number(range)||7;
+    // 7일 보기일 땐 오늘을 정가운데(4번째)로 오도록 -3일~+3일 범위로. 그 외(30/90일)는 오늘까지의 지난 N일.
+    var startOffset = days===7 ? -3 : -(days-1), endOffset = days===7 ? 3 : 0;
+    for(var i=startOffset;i<=endOffset;i++) dayKeys.push(localDateStr(new Date(today.getFullYear(), today.getMonth(), today.getDate()+i)));
   }
-  var buckets = {}; // dayKey -> {전화, 문자, '만남(컨택메모)', 서베이 응답, 컨텍스케쥴, 컨텐츠촬영} — 건수가 아니라 가중치(점수) 합산
-  dayKeys.forEach(function(k){ buckets[k] = {'전화':0,'문자':0,'만남(컨택메모)':0,'서베이 응답':0,'컨텍스케쥴':0,'컨텐츠촬영':0}; });
-  log.forEach(function(l){
+  var buckets = {}, counts = {};
+  dayKeys.forEach(function(k){ buckets[k]={}; REACH_DAILY_TYPES.forEach(function(t){ buckets[k][t]=0; }); });
+  REACH_DAILY_TYPES.forEach(function(t){ counts[t]=0; });
+  function addTo(dk, t, w){ if(!buckets[dk]) return; buckets[dk][t]+=w; counts[t]++; }
+  // ① 전화·문자·서베이·만남메모 (만남메모는 '컨텍스케쥴'에 합산)
+  buildActivityLog().forEach(function(l){
+    if(!l.reach) return;
     var dk = (l.dt||'').slice(0,10);
-    if(!buckets[dk]) return;
-    if(buckets[dk][l.type]===undefined) return;
-    buckets[dk][l.type] += (l.weight||1);
+    if(l.type==='전화'||l.type==='문자'||l.type==='프로파일링') addTo(dk, l.type, l.weight||1);
+    else if(l.type==='만남(컨택메모)') addTo(dk, '컨텍스케쥴', l.weight||1);
   });
-  return { dayKeys:dayKeys, buckets:buckets, todayKey:todayKey };
+  // ② 캘린더 일정 — ETC 빼고 전부. 여러 날/반복 일정은 해당되는 날짜마다 1번씩
+  Object.keys(schedules).forEach(function(sid){
+    var sc = schedules[sid];
+    if(!sc || !sc.date) return;
+    var t = sc.type||'컨택';
+    if(REACH_SCHED_WEIGHT[t]===undefined) return; // ETC 등 제외
+    if(t==='컨택' && !sc.empId) return;            // 기존 규칙 유지: 대상자 없는 '컨택' 일정은 실적 아님
+    var label = t==='컨택' ? '컨텍스케쥴' : t;
+    dayKeys.forEach(function(dk){ if(scheduleOccursOnDate(sc, dk)) addTo(dk, label, REACH_SCHED_WEIGHT[t]); });
+  });
+  return { dayKeys:dayKeys, buckets:buckets, counts:counts, todayKey:todayKey };
 }
 function renderReachDailyChart(){
   var canvasEl = document.getElementById('reachDailyChart');
   if(!canvasEl) return;
   var data = buildDailyReachSeries(_reachDailyRange);
+  var n = data.dayKeys.length;
   var labels = data.dayKeys.map(function(k){ var p=k.split('-'); return Number(p[1])+'.'+Number(p[2]); });
   var todayIdx = data.dayKeys.indexOf(data.todayKey);
-  var typeColors = { '전화':'#4361ee', '문자':'#7c9cff', '만남(컨택메모)':'#f2a94e', '서베이 응답':'#0f9d67', '컨텍스케쥴':'#d8306b', '컨텐츠촬영':'#7c3aed' };
-  var datasets = Object.keys(typeColors).map(function(t){
-    return { label:t, data:data.dayKeys.map(function(k){ return data.buckets[k][t]; }), backgroundColor:typeColors[t], borderRadius:3, maxBarThickness:_reachDailyRange<=7?26:(_reachDailyRange<=30?10:4) };
-  });
+  var datasets = REACH_DAILY_TYPES.map(function(t){
+    return { label:t, data:data.dayKeys.map(function(k){ return data.buckets[k][t]; }), backgroundColor:REACH_DAILY_COLORS[t], borderRadius:3, maxBarThickness:n<=7?26:(n<=31?10:(n<=93?4:2)) };
+  }).filter(function(ds){ return ds.data.some(function(v){ return v>0; }); }); // 기간 내 0인 항목은 범례에서 숨김
+  // 기간 요약
+  var total = 0; data.dayKeys.forEach(function(k){ REACH_DAILY_TYPES.forEach(function(t){ total += data.buckets[k][t]; }); });
+  var sumEl = document.getElementById('reach-daily-summary');
+  if(sumEl){
+    var f=data.dayKeys[0], t=data.dayKeys[n-1];
+    sumEl.innerHTML = '<b>'+f.replace(/-/g,'.')+' ~ '+t.replace(/-/g,'.')+'</b> ('+n+'일) · 합계 <b style="color:var(--accent);">'+total.toLocaleString()+'점</b> · 일평균 '+(Math.round(total/n*10)/10)+'점'
+      +' <span style="color:var(--muted);">· '+REACH_DAILY_TYPES.filter(function(x){ return data.counts[x]; }).map(function(x){ return x+' '+data.counts[x]+'건'; }).join(' · ')+'</span>';
+  }
   if(_reachDailyChartInstance){ _reachDailyChartInstance.destroy(); _reachDailyChartInstance=null; }
   _reachDailyChartInstance = new Chart(canvasEl.getContext('2d'), {
     type:'bar',
@@ -2113,7 +2156,7 @@ function renderReachDailyChart(){
       responsive:true, maintainAspectRatio:false,
       plugins:{ legend:{display:true, position:'bottom', labels:{boxWidth:10, font:{size:10}}} },
       scales:{
-        x:{ stacked:true, grid:{display:false}, ticks:{font:{size:9}, maxRotation:0, autoSkip:true, maxTicksLimit: _reachDailyRange<=30?_reachDailyRange:15,
+        x:{ stacked:true, grid:{display:false}, ticks:{font:{size:9}, maxRotation:0, autoSkip:true, maxTicksLimit: n<=31?n:15,
               color:function(ctx){ return ctx.index===todayIdx ? '#2563eb' : '#8a8f9c'; },
               font:function(ctx){ return ctx.index===todayIdx ? {size:9,weight:'700'} : {size:9}; } } },
         y:{ stacked:true, beginAtZero:true, grid:{color:'rgba(128,128,128,0.15)'}, ticks:{font:{size:10}, precision:0}, title:{display:true, text:'점수', font:{size:10}} }
@@ -2316,7 +2359,7 @@ function buildActivityLog(){
   Object.keys(surveyResponses).forEach(function(id){
     var p = people[id]; if(!p) return;
     Object.values(surveyResponses[id]).forEach(function(r){
-      log.push({ dt:r.submittedAt, type:'서베이 응답', icon:'📋', empId:id, name:p.name, branch:(p.hq||'')+' '+(p.branch||''), engage:true, reach:true, weight:1 });
+      log.push({ dt:r.submittedAt, type:'프로파일링', icon:'📋', empId:id, name:p.name, branch:(p.hq||'')+' '+(p.branch||''), engage:true, reach:true, weight:1 });
     });
   });
   // 컨텍스케쥴: 캘린더에 유형="컨택"으로 등록된 일정 그 자체를 실적으로 인정 (등록되면 즉시 인정, +20점으로 고배점)
@@ -2351,7 +2394,7 @@ function openActivityLogModal(){
       +'<option value="만남(컨택메모)">📝 만남(컨택메모)</option>'
       +'<option value="컨텍스케쥴">📅 컨텍스케쥴</option>'
       +'<option value="컨텐츠촬영">🎬 컨텐츠촬영</option>'
-      +'<option value="서베이 응답">📋 서베이 응답</option>'
+      +'<option value="프로파일링">📋 프로파일링</option>'
     +'</select>'
     +'<div id="activity-log-list" style="max-height:60vh;overflow-y:auto;"></div>';
   overlay.appendChild(box);
