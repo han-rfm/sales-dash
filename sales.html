@@ -204,6 +204,7 @@ tr.row-clickable:hover{background:var(--sf2);}
           <span style="display:flex;gap:6px;">
             <button class="btn" id="survey-org-toggle" style="font-size:11px;padding:5px 10px;" onclick="toggleSurveyOrgBreakdown('all')">🏢 조직별 보기 ▾</button>
             <button class="btn" id="survey-org-toggle-nonew" style="font-size:11px;padding:5px 10px;" onclick="toggleSurveyOrgBreakdown('nonew')">🌱 신입 제외 조직별 ▾</button>
+            <button class="btn" id="survey-risk-toggle" style="font-size:11px;padding:5px 10px;color:#c06a00;" onclick="toggleSurveyRiskPanel()">⚠ 잠재 이탈자 분석 ▾</button>
             <button class="btn" style="font-size:11px;padding:5px 10px;" onclick="showSurveyPending()">미응답자 보기</button>
           </span>
         </div>
@@ -221,6 +222,7 @@ tr.row-clickable:hover{background:var(--sf2);}
         <div style="font-size:12px;color:var(--muted);margin-top:3px;" id="survey-rate-label">-</div>
         <div style="font-size:11px;color:var(--accent);margin-top:2px;" id="survey-rate-label-active">-</div>
         <div id="survey-org-breakdown" style="display:none;margin-top:12px;border-top:1px solid var(--bd);padding-top:12px;"></div>
+        <div id="survey-risk-panel" style="display:none;margin-top:12px;border-top:1px solid var(--bd);padding-top:12px;"></div>
         <div style="border-top:1px solid var(--bd);margin-top:12px;padding-top:12px;">
           <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">📸 방문 인증샷 업로드 현황</div>
           <div class="energy-bar-wrap" style="position:relative;">
@@ -388,6 +390,10 @@ tr.row-clickable:hover{background:var(--sf2);}
           왼쪽: 기존 C/R 등급(세로 A~C=실적, 가로 1~3=역량) 배치 현황 · 오른쪽: eFSR 확장평가 C/R — 기존 등급을 대체하지 않고, 같은 인원을 실적[MIP·SP·건수]×활동역량[S/W+TIP 영상수료] 관점에서 한 번 더 자세히 들여다보는 보조 지표 (각 상/중/하 33%씩 상대평가)
         </p>
         <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:14px;padding:10px 12px;background:var(--sf2);border-radius:8px;">
+          <span style="display:inline-flex;border:1px solid var(--bd);border-radius:8px;overflow:hidden;">
+            <button class="btn primary" id="grid9-scope-active" onclick="setGrid9Scope('active')" style="border:none;border-radius:0;font-size:11.5px;padding:5px 10px;">실관리 인원 (해촉·소통불가 제외)</button>
+            <button class="btn" id="grid9-scope-all" onclick="setGrid9Scope('all')" style="border:none;border-radius:0;font-size:11.5px;padding:5px 10px;">해촉·소통불가 포함</button>
+          </span>
           <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;">조회할 월
             <select id="grid9-view-ym" onchange="renderOrgList()" style="font-size:12px;padding:4px 6px;"></select>
           </label>
@@ -2590,6 +2596,7 @@ function renderSurveyRate(ids){
   else { var a=document.getElementById('survey-rate-pct-active'); if(a) a.textContent=''; }
   renderPhotoUploadRate(); // 사진 현황은 자체 기준(전체 등록인원 중 활성)으로 계산
   renderSurveyOrgBreakdown();
+  renderSurveyRiskPanel();
 }
 // 방문 인증샷 업로드 현황 — 사진 1장 이상 올린 인원 기준 (분모: 해촉·소통불가 제외 활성 인원)
 function renderPhotoUploadRate(ids){
@@ -2789,6 +2796,104 @@ function renderSurveyOrgBreakdown(){
     }
   });
   el.innerHTML = html;
+}
+/* ---------- 잠재 이탈자 분석 ----------
+   잠재 이탈자 = 재적(해촉 제외) − 소통불가 중 프로파일링(서베이) 미제출자 = 조직별 보기의 '주황'
+   섹션(접고 펼치기): ① 위촉 월차(평균·분포, 제출자와 비교) ② C/R 등급 분포 ③ 소속 조직별 분포 ④ 명단 */
+var _surveyRiskOpen = false, _surveyRiskNoNew = false;
+function toggleSurveyRiskPanel(){
+  _surveyRiskOpen = !_surveyRiskOpen;
+  var el = document.getElementById('survey-risk-panel'), b = document.getElementById('survey-risk-toggle');
+  if(el) el.style.display = _surveyRiskOpen ? 'block' : 'none';
+  if(b){ b.textContent = '⚠ 잠재 이탈자 분석 '+(_surveyRiskOpen?'▴':'▾'); b.style.background = _surveyRiskOpen ? '#fff1de' : ''; }
+  if(_surveyRiskOpen) renderSurveyRiskPanel();
+}
+function tenureMonths(p){
+  var j = String((p&&p.joinDate)||''); if(j.length<6) return null;
+  var now = new Date();
+  return (now.getFullYear()*12+now.getMonth()+1) - (Number(j.slice(0,4))*12+Number(j.slice(4,6)));
+}
+var _riskOpenSec = { tenure:true, cr:true, org:true, list:false };
+function toggleRiskSec(k){ _riskOpenSec[k] = !_riskOpenSec[k]; renderSurveyRiskPanel(); }
+function renderSurveyRiskPanel(){
+  var el = document.getElementById('survey-risk-panel');
+  if(!el || !_surveyRiskOpen) return;
+  function submitted(id){ return !!(surveyResponses[id] && Object.keys(surveyResponses[id]).length>0); }
+  var managed = Object.keys(people).filter(function(id){ var p=people[id]; return !p.terminated && !p.terminationCandidate && !(_surveyRiskNoNew && isNewbie(p)); });
+  var risk = managed.filter(function(id){ return !submitted(id); });
+  var done = managed.filter(submitted);
+  var newbieInRisk = risk.filter(function(id){ return isNewbie(people[id]); }).length;
+  function avgTenure(ids){ var v = ids.map(function(id){ return tenureMonths(people[id]); }).filter(function(x){ return x!==null; }); return v.length ? v.reduce(function(a,b){return a+b;},0)/v.length : null; }
+  function bar(pct, color){ return '<div style="flex:1;height:10px;background:var(--sf2);border-radius:5px;overflow:hidden;"><div style="width:'+pct+'%;height:100%;background:'+color+';"></div></div>'; }
+  function sec(k, title, body){
+    var open = _riskOpenSec[k];
+    return '<div style="border:1px solid var(--bd);border-radius:10px;margin-bottom:8px;background:#fff;">'
+      +'<div onclick="toggleRiskSec(\''+k+'\')" style="cursor:pointer;padding:9px 12px;font-size:12.5px;font-weight:800;display:flex;justify-content:space-between;">'+title+'<span style="color:var(--muted);">'+(open?'▴':'▾')+'</span></div>'
+      +(open?'<div style="padding:0 12px 10px;">'+body+'</div>':'')+'</div>';
+  }
+  var R = risk.length;
+  // 명단
+  var listHtml = R ? risk.slice().sort(function(a,b){ var pa=people[a],pb=people[b]; return (pa.hq||'').localeCompare(pb.hq||'')||(pa.branch||'').localeCompare(pb.branch||'')||(pa.name||'').localeCompare(pb.name||''); }).map(function(id){
+      var p=people[id], t=tenureMonths(p), sent=lastSurveyLinkSentDate(id);
+      return '<div class="row-clickable" onclick="openProfile(\''+id+'\')" style="display:flex;justify-content:space-between;gap:8px;padding:6px 2px;border-bottom:1px dashed var(--bd);font-size:11.5px;cursor:pointer;">'
+        +'<span><b>'+(p.name||'-')+'</b> <span style="color:var(--muted);">'+(p.hq||'')+' · '+(p.branch||'')+'</span>'+(isNewbie(p)?' <span style="color:#0b6e48;font-size:10px;">🌱신입</span>':'')+'</span>'
+        +'<span style="color:var(--muted);white-space:nowrap;">'+(t!==null?t+'개월':'위촉일 -')+' · '+(p.cr||'C/R -')+' · '+(sent?sent+' 발송':'미발송')+'</span></div>';
+    }).join('') : '<div class="empty">잠재 이탈자가 없어요.</div>';
+  // 위촉 월차
+  var aR = avgTenure(risk), aD = avgTenure(done);
+  var BK = [['3개월 미만',0,2],['3~5개월',3,5],['6~11개월',6,11],['1~2년',12,23],['2년 이상',24,9999]];
+  var tenureRows = BK.map(function(b){
+    var inB = function(id){ var t=tenureMonths(people[id]); return t!==null && t>=b[1] && t<=b[2]; };
+    var n = risk.filter(inB).length, nd = managed.filter(inB).length;
+    var pct = R ? Math.round(n/R*100) : 0;
+    return '<div style="display:flex;align-items:center;gap:8px;font-size:11.5px;padding:3px 0;"><span style="width:72px;">'+b[0]+'</span>'+bar(pct,'#f4a340')
+      +'<span style="width:170px;text-align:right;white-space:nowrap;"><b>'+n+'명</b> ('+pct+'%) <span style="color:var(--muted);">· 구간 미제출률 '+(nd?Math.round(n/nd*100):0)+'%</span></span></div>';
+  }).join('');
+  var noJoin = risk.filter(function(id){ return tenureMonths(people[id])===null; }).length;
+  var tenureHtml = '<div style="display:flex;gap:10px;margin-bottom:8px;">'
+      +'<div style="flex:1;background:#fff6eb;border-radius:8px;padding:8px 10px;"><div style="font-size:10.5px;color:#c06a00;">잠재 이탈자 평균 월차</div><div style="font-size:20px;font-weight:800;color:#c06a00;">'+(aR!==null?(Math.round(aR*10)/10)+'개월':'-')+'</div></div>'
+      +'<div style="flex:1;background:#eefaf3;border-radius:8px;padding:8px 10px;"><div style="font-size:10.5px;color:#0b6e48;">제출자 평균 월차 (비교)</div><div style="font-size:20px;font-weight:800;color:#0b6e48;">'+(aD!==null?(Math.round(aD*10)/10)+'개월':'-')+'</div></div>'
+    +'</div>'+tenureRows
+    +'<div style="font-size:10.5px;color:var(--muted);margin-top:4px;">월차 = 이번 달 − 위촉월 (날짜 무시). 구간 미제출률 = 그 구간 인원 중 잠재 이탈자 비율'+(noJoin?' · 위촉일 없는 '+noJoin+'명은 평균에서 제외':'')+'</div>';
+  // C/R 등급
+  var grades = ['A1','B1','C1','A2','B2','C2','A3','B3','C3'];
+  var crCount = {}, crManaged = {}; grades.forEach(function(g){ crCount[g]=0; crManaged[g]=0; }); var crNone = 0;
+  managed.forEach(function(id){ var g=String(people[id].cr||'').toUpperCase(); if(crManaged[g]!==undefined) crManaged[g]++; });
+  risk.forEach(function(id){ var g=String(people[id].cr||'').toUpperCase(); if(crCount[g]!==undefined) crCount[g]++; else crNone++; });
+  var crGrid = '<table style="width:100%;border-collapse:collapse;font-size:11px;"><tr><td></td>'+['C(하)','B(중)','A(상)'].map(function(c){ return '<td style="text-align:center;color:var(--muted);padding:3px;">'+c+'</td>'; }).join('')+'</tr>';
+  ['1','2','3'].forEach(function(d,ri){
+    crGrid += '<tr><td style="color:var(--muted);padding:3px;white-space:nowrap;">'+['1(상)','2(중)','3(하)'][ri]+'</td>';
+    ['C','B','A'].forEach(function(l){
+      var g=l+d, n=crCount[g], m=crManaged[g];
+      crGrid += '<td style="padding:2px;"><div style="background:'+(n?'#fff1de':'var(--sf2)')+';border:1px solid '+(n?'#f4a340':'var(--bd)')+';border-radius:7px;text-align:center;padding:6px 2px;">'
+        +'<div style="font-size:14px;font-weight:800;color:'+(n?'#c06a00':'var(--muted)')+';">'+n+'</div>'
+        +'<div style="font-size:9.5px;color:var(--muted);">이탈자의 '+(R?Math.round(n/R*100):0)+'%</div>'
+        +'<div style="font-size:9.5px;color:#c06a00;">등급 내 '+(m?Math.round(n/m*100):0)+'% ('+n+'/'+m+')</div></div></td>';
+    });
+    crGrid += '</tr>';
+  });
+  crGrid += '</table><div style="font-size:10.5px;color:var(--muted);margin-top:4px;">칸 숫자 = 잠재 이탈자 수 · "이탈자의 %" = 잠재 이탈자 전체 중 비중 · "등급 내 %" = 그 등급 인원 중 미제출 비율'+(crNone?' · C/R 미기재 '+crNone+'명':'')+'</div>';
+  // 소속 조직별
+  var byHq = {};
+  risk.forEach(function(id){ var p=people[id], h=p.hq||'미분류', b=p.branch||'미분류'; byHq[h]=byHq[h]||{n:0,br:{}}; byHq[h].n++; byHq[h].br[b]=(byHq[h].br[b]||0)+1; });
+  var mgHq = {}; managed.forEach(function(id){ var h=people[id].hq||'미분류'; mgHq[h]=(mgHq[h]||0)+1; });
+  var orgHtml = Object.keys(byHq).sort(function(a,b){ return byHq[b].n-byHq[a].n; }).map(function(h){
+    var o=byHq[h], pct=R?Math.round(o.n/R*100):0;
+    var brs = Object.keys(o.br).sort(function(a,b){ return o.br[b]-o.br[a]; }).map(function(b){ return b+' '+o.br[b]; }).join(' · ');
+    return '<div style="padding:5px 0;border-bottom:1px dashed var(--bd);">'
+      +'<div style="display:flex;align-items:center;gap:8px;font-size:11.5px;"><span style="width:72px;font-weight:700;">'+h+'</span>'+bar(pct,'#f4a340')
+      +'<span style="width:170px;text-align:right;white-space:nowrap;"><b>'+o.n+'명</b> ('+pct+'%) <span style="color:var(--muted);">· 본부 내 '+(mgHq[h]?Math.round(o.n/mgHq[h]*100):0)+'%</span></span></div>'
+      +'<div style="font-size:10.5px;color:var(--muted);margin:2px 0 0 80px;">'+brs+'</div></div>';
+  }).join('') || '<div class="empty">-</div>';
+  el.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">'
+      +'<div style="font-size:13px;font-weight:800;color:#c06a00;">⚠ 잠재 이탈자 '+R+'명 <span style="font-size:11px;font-weight:400;color:var(--muted);">/ 기준 '+managed.length+'명 ('+(managed.length?Math.round(R/managed.length*100):0)+'%) · 재적 − 소통불가 중 프로파일링 미제출'+(!_surveyRiskNoNew&&newbieInRisk?' · 그중 🌱신입 '+newbieInRisk+'명':'')+'</span></div>'
+      +'<label style="font-size:11px;display:flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" '+(_surveyRiskNoNew?'checked':'')+' onchange="_surveyRiskNoNew=this.checked;renderSurveyRiskPanel();" style="width:auto;"> 🌱 신입('+newbieCutoffLabel()+'~ 위촉) 제외</label>'
+    +'</div>'
+    + sec('tenure','📅 위촉 월차', tenureHtml)
+    + sec('cr','🔲 C/R 등급 분포', crGrid)
+    + sec('org','🏢 소속 조직별 분포', orgHtml)
+    + sec('list','📋 잠재 이탈자 명단 ('+R+'명)', '<div style="max-height:320px;overflow-y:auto;">'+listHtml+'</div>');
 }
 function openSurveyOrgPending(key){
   var c = _surveyOrgPendingCache[key]; if(!c) return;
@@ -3163,14 +3268,26 @@ function openGrid9Cell(gridKey, r, c){
   document.body.appendChild(overlay);
 }
 // viewYm: 조회할 월(YYYYMM). 비어있으면 현재 라이브 people 데이터 사용, 값이 있으면 그 달 스냅샷 기준으로 그림
+var _grid9Scope = 'active'; // 'active'(해촉·소통불가 제외, 기본) | 'all'(포함)
+function setGrid9Scope(v){
+  _grid9Scope = v;
+  ['active','all'].forEach(function(k){ var b=document.getElementById('grid9-scope-'+k); if(b) b.classList.toggle('primary', k===v); });
+  renderOrgList();
+}
 function renderGrid9(ids, viewYm){
   populateGrid9MonthSelectors();
   var src = viewYm ? (snapshots[viewYm]||{}) : people;
   var asOfYm = viewYm || TIP_VIDEO_DATA_END_YM;
   ids = ids.filter(function(id){ return src[id]; }); // 조회월에 데이터 없는 사람은 이 그리드에서 제외
   // 해촉·소통불가 제외 (현재 상태 기준) — 분포%·설문응답률 모두 실관리 인원 기준으로 계산 (2026-11 요청)
-  var grid9Excluded = ids.filter(function(id){ var p=people[id]; return p && (p.terminated || p.terminationCandidate); }).length;
-  ids = ids.filter(function(id){ var p=people[id]; return !(p && (p.terminated || p.terminationCandidate)); });
+  //   _grid9Scope==='all'이면 버튼으로 해촉·소통불가 포함 그리드도 볼 수 있음
+  var grid9Excluded = 0, grid9IncludedOut = 0;
+  if(_grid9Scope==='all'){
+    grid9IncludedOut = ids.filter(function(id){ var p=people[id]; return p && (p.terminated || p.terminationCandidate); }).length;
+  } else {
+    grid9Excluded = ids.filter(function(id){ var p=people[id]; return p && (p.terminated || p.terminationCandidate); }).length;
+    ids = ids.filter(function(id){ var p=people[id]; return !(p && (p.terminated || p.terminationCandidate)); });
+  }
   var total = ids.length;
 
   // 1) 기존 C/R 등급 그리드 — 행(세로)=숫자(1~3, 실적), 열(가로)=문자(C~A, 역량)
@@ -3191,7 +3308,7 @@ function renderGrid9(ids, viewYm){
   _grid9Data.official = officialIdMatrix;
   document.getElementById('grid9-official').innerHTML =
     render9x9GridHtml(officialMatrix, ['1(상)','2(중)','3(하)'], ['C(하)','B(중)','A(상)'], total, 'official', officialIdMatrix)
-    + '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">'+(grid9Excluded?'해촉·소통불가 '+grid9Excluded+'명 제외 · ':'')+(officialUnclassified?'C/R 미기재 '+officialUnclassified+'명 제외(그중 설문 응답 '+officialUnclassifiedSv+'명) · ':'')+'칸 아래 📋 = 그 칸 인원 중 설문 응답자 수 · 응답률</div>';
+    + '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">'+(grid9Excluded?'해촉·소통불가 '+grid9Excluded+'명 제외 · ':'')+(grid9IncludedOut?'<b style="color:#c06a00;">해촉·소통불가 '+grid9IncludedOut+'명 포함</b> · ':'')+(officialUnclassified?'C/R 미기재 '+officialUnclassified+'명 제외(그중 설문 응답 '+officialUnclassifiedSv+'명) · ':'')+'칸 아래 📋 = 그 칸 인원 중 설문 응답자 수 · 응답률</div>';
 
   // 2) eFSR 확장평가 C/R — 행=실적(0=상→위, 2=하→아래), 열=활동역량(0=상이지만 오른쪽에 오도록 2-act로 반전)
   var eqTiers = computeEquityTiers(ids, src, asOfYm);
@@ -3207,7 +3324,7 @@ function renderGrid9(ids, viewYm){
   var equityClassified = Object.keys(eqTiers).length;
   document.getElementById('grid9-equity').innerHTML =
     render9x9GridHtml(equityMatrix, ['실적 상','실적 중','실적 하'], ['활동 하','활동 중','활동 상'], equityClassified, 'equity', equityIdMatrix)
-    + '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">'+(grid9Excluded?'해촉·소통불가 '+grid9Excluded+'명 제외':'')+(grid9Excluded&&(total-equityClassified)?' · ':'')+(total-equityClassified ? '데이터 부족 '+(total-equityClassified)+'명 제외' : '')+'</div>';
+    + '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">'+(grid9Excluded?'해촉·소통불가 '+grid9Excluded+'명 제외':'')+(grid9IncludedOut?'<b style="color:#c06a00;">해촉·소통불가 '+grid9IncludedOut+'명 포함</b>':'')+((grid9Excluded||grid9IncludedOut)&&(total-equityClassified)?' · ':'')+(total-equityClassified ? '데이터 부족 '+(total-equityClassified)+'명 제외' : '')+'</div>';
 
   // 3) 성장/이동현황 — "성장 기준월"이 설정돼 있으면 그 달 대비로, 없으면 직전 스냅샷월 대비로 비교
   var movementHtml = '<div style="font-size:12px;color:var(--muted);">비교할 데이터가 없어요.</div>';
