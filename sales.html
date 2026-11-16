@@ -201,7 +201,10 @@ tr.row-clickable:hover{background:var(--sf2);}
       <div class="card" style="margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
           <div class="card-title" style="margin:0;">📋 프로파일링 현황</div>
-          <button class="btn" style="font-size:11px;padding:5px 10px;" onclick="showSurveyPending()">미응답자 보기</button>
+          <span style="display:flex;gap:6px;">
+            <button class="btn" id="survey-org-toggle" style="font-size:11px;padding:5px 10px;" onclick="toggleSurveyOrgBreakdown()">🏢 조직별 보기 ▾</button>
+            <button class="btn" style="font-size:11px;padding:5px 10px;" onclick="showSurveyPending()">미응답자 보기</button>
+          </span>
         </div>
         <div class="energy-bar-wrap" style="position:relative;">
           <div id="survey-rate-fill-active" style="position:absolute;left:0;top:0;height:100%;width:0%;background:repeating-linear-gradient(45deg,#a8d8c0 0 6px,#c7e8d8 6px 12px);border-radius:8px;transition:width .3s;"></div>
@@ -216,6 +219,7 @@ tr.row-clickable:hover{background:var(--sf2);}
         <div style="font-size:13px;color:var(--text);margin-top:8px;font-weight:600;" id="survey-rate-label-cum">-</div>
         <div style="font-size:12px;color:var(--muted);margin-top:3px;" id="survey-rate-label">-</div>
         <div style="font-size:11px;color:var(--accent);margin-top:2px;" id="survey-rate-label-active">-</div>
+        <div id="survey-org-breakdown" style="display:none;margin-top:12px;border-top:1px solid var(--bd);padding-top:12px;"></div>
         <div style="border-top:1px solid var(--bd);margin-top:12px;padding-top:12px;">
           <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">📸 방문 인증샷 업로드 현황</div>
           <div class="energy-bar-wrap" style="position:relative;">
@@ -2488,6 +2492,7 @@ function renderSurveyRate(ids){
   if(activePct-pct>=6) placePct('survey-rate-pct-active', activePct);
   else { var a=document.getElementById('survey-rate-pct-active'); if(a) a.textContent=''; }
   renderPhotoUploadRate(); // 사진 현황은 자체 기준(전체 등록인원 중 활성)으로 계산
+  renderSurveyOrgBreakdown();
 }
 // 방문 인증샷 업로드 현황 — 사진 1장 이상 올린 인원 기준 (분모: 해촉·소통불가 제외 활성 인원)
 function renderPhotoUploadRate(ids){
@@ -2569,6 +2574,105 @@ function exportSurveyPendingExcel(){
   XLSX.utils.book_append_sheet(wb, ws2, '미응답자 명단');
   var now = new Date();
   XLSX.writeFile(wb, '서베이_미응답자_'+now.getFullYear()+pad2(now.getMonth()+1)+pad2(now.getDate())+'.xlsx');
+}
+/* ---------- 프로파일링 조직별 보기 ----------
+   기준(100%) = 실관리 인원 = 재적(해촉 제외) − 소통불가
+   초록 = 제출(프로파일링 성공), 주황 = 미제출 = '잠재 이탈 가능자'
+   본부 행 클릭 → 그 본부 지점별 행 펼침 / 미제출 숫자 클릭 → 명단 */
+var _surveyOrgOpen = false, _surveyOrgOpenHq = {};
+function toggleSurveyOrgBreakdown(){
+  _surveyOrgOpen = !_surveyOrgOpen;
+  var el = document.getElementById('survey-org-breakdown');
+  var btn = document.getElementById('survey-org-toggle');
+  if(el) el.style.display = _surveyOrgOpen ? 'block' : 'none';
+  if(btn) btn.textContent = _surveyOrgOpen ? '🏢 조직별 보기 ▴' : '🏢 조직별 보기 ▾';
+  if(_surveyOrgOpen) renderSurveyOrgBreakdown();
+}
+function toggleSurveyOrgHq(hq){
+  _surveyOrgOpenHq[hq] = !_surveyOrgOpenHq[hq];
+  renderSurveyOrgBreakdown();
+}
+function _surveyOrgStats(filterFn){
+  var roster = Object.keys(people).filter(function(id){ var p=people[id]; return !p.terminated && filterFn(p); });
+  var managed = roster.filter(function(id){ return !people[id].terminationCandidate; });
+  var done = managed.filter(function(id){ return surveyResponses[id] && Object.keys(surveyResponses[id]).length>0; });
+  return { roster:roster.length, incommunicado:roster.length-managed.length, managed:managed.length, done:done.length,
+           pendingIds: managed.filter(function(id){ return done.indexOf(id)<0; }) };
+}
+var _surveyOrgPendingCache = {};
+function _surveyOrgRowHtml(label, st, opts){
+  opts = opts||{};
+  var key = 'k'+Object.keys(_surveyOrgPendingCache).length;
+  _surveyOrgPendingCache[key] = { label:label, ids:st.pendingIds };
+  var pDone = st.managed ? Math.round(st.done/st.managed*100) : 0;
+  var pRisk = st.managed ? 100-pDone : 0;
+  var nRisk = st.managed - st.done;
+  if(opts.indent){
+    // 지점 행은 한 줄로 압축: 지점명 | 막대 | 제출/잠재이탈
+    return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0 4px 18px;border-bottom:1px dashed var(--bd);font-size:11px;">'
+      +'<span style="width:110px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+label+'">'+label+' <span style="color:var(--muted);">('+st.managed+')</span></span>'
+      +'<div style="flex:1;display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--sf2);">'
+        +(st.managed?'<div style="width:'+pDone+'%;background:linear-gradient(90deg,#4361ee,#0f9d67);"></div><div style="width:'+pRisk+'%;background:#f4a340;"></div>':'')
+      +'</div>'
+      +'<span style="width:150px;flex-shrink:0;text-align:right;white-space:nowrap;"><span style="color:var(--good);">'+st.done+'명 '+pDone+'%</span> · '
+        +'<span style="color:#c06a00;'+(nRisk?'text-decoration:underline;cursor:pointer;':'')+'"'+(nRisk?' onclick="event.stopPropagation();openSurveyOrgPending(\''+key+'\')"':'')+'>⚠ '+nRisk+'명 '+pRisk+'%</span></span>'
+    +'</div>';
+  }
+  return '<div style="padding:7px 0;'+(opts.indent?'padding-left:18px;':'')+'border-bottom:1px solid var(--bd);'+(opts.onclick?'cursor:pointer;':'')+'"'+(opts.onclick?' onclick="'+opts.onclick+'"':'')+'>'
+    +'<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:4px;">'
+      +'<span style="font-size:'+(opts.bold?'13':'12')+'px;font-weight:'+(opts.bold?'800':(opts.indent?'500':'700'))+';">'+(opts.caret||'')+label+'</span>'
+      +'<span style="font-size:10.5px;color:var(--muted);white-space:nowrap;">재적 '+st.roster+' − 소통불가 '+st.incommunicado+' = <b style="color:var(--text);">기준 '+st.managed+'명</b></span>'
+    +'</div>'
+    +'<div style="display:flex;height:'+(opts.indent?'14':'18')+'px;border-radius:6px;overflow:hidden;background:var(--sf2);">'
+      +(st.managed ? '<div style="width:'+pDone+'%;background:linear-gradient(90deg,#4361ee,#0f9d67);color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:flex-end;padding-right:5px;white-space:nowrap;">'+(pDone>=12?pDone+'%':'')+'</div>'
+        +'<div style="width:'+pRisk+'%;background:#f4a340;color:#7a3e00;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:flex-end;padding-right:5px;white-space:nowrap;">'+(pRisk>=10?pRisk+'%':'')+'</div>' : '')
+    +'</div>'
+    +'<div style="font-size:10.5px;margin-top:3px;display:flex;gap:10px;">'
+      +'<span style="color:var(--good);">✅ 제출 '+st.done+'명 ('+pDone+'%)</span>'
+      +'<span style="color:#c06a00;'+(nRisk?'text-decoration:underline;cursor:pointer;':'')+'"'+(nRisk?' onclick="event.stopPropagation();openSurveyOrgPending(\''+key+'\')"':'')+'>⚠ 잠재 이탈 '+nRisk+'명 ('+pRisk+'%)</span>'
+    +'</div>'
+  +'</div>';
+}
+function renderSurveyOrgBreakdown(){
+  var el = document.getElementById('survey-org-breakdown');
+  if(!el || !_surveyOrgOpen) return;
+  _surveyOrgPendingCache = {};
+  var hqs = [...new Set(Object.keys(people).filter(function(id){ return !people[id].terminated; }).map(function(id){ return people[id].hq||'미분류'; }))].sort();
+  var html = '<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">기준(100%) = 재적 − 소통불가 · <span style="color:var(--good);font-weight:700;">초록 = 프로파일링 성공</span> · <span style="color:#c06a00;font-weight:700;">주황 = 미제출(잠재 이탈 가능자)</span> · 본부를 누르면 지점별로 펼쳐져요</div>';
+  html += _surveyOrgRowHtml('전체', _surveyOrgStats(function(){ return true; }), {bold:true});
+  var hqRows = hqs.map(function(hq){
+    var st = _surveyOrgStats(function(p){ return (p.hq||'미분류')===hq; });
+    return {hq:hq, st:st, risk: st.managed ? (st.managed-st.done)/st.managed : 0};
+  }).sort(function(a,b){ return b.risk-a.risk || a.hq.localeCompare(b.hq); }); // 잠재 이탈 비율 높은 본부가 위
+  hqRows.forEach(function(r){
+    var open = !!_surveyOrgOpenHq[r.hq];
+    html += _surveyOrgRowHtml(r.hq, r.st, { caret:(open?'▾ ':'▸ '), onclick:"toggleSurveyOrgHq('"+String(r.hq).replace(/'/g,"\\'")+"')" });
+    if(open){
+      var brs = [...new Set(Object.keys(people).filter(function(id){ var p=people[id]; return !p.terminated && (p.hq||'미분류')===r.hq; }).map(function(id){ return people[id].branch||'미분류'; }))];
+      brs.map(function(b){
+        var st = _surveyOrgStats(function(p){ return (p.hq||'미분류')===r.hq && (p.branch||'미분류')===b; });
+        return {b:b, st:st, risk: st.managed ? (st.managed-st.done)/st.managed : 0};
+      }).sort(function(a,b){ return b.risk-a.risk || a.b.localeCompare(b.b); })
+        .forEach(function(x){ html += _surveyOrgRowHtml(x.b, x.st, {indent:true}); });
+    }
+  });
+  el.innerHTML = html;
+}
+function openSurveyOrgPending(key){
+  var c = _surveyOrgPendingCache[key]; if(!c) return;
+  var overlay=document.createElement('div'); overlay.className='modal-overlay';
+  overlay.onclick=function(e){ if(e.target===overlay) overlay.remove(); };
+  var box=document.createElement('div'); box.className='modal-box'; box.style.position='relative';
+  box.innerHTML = '<button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button>'
+    +'<div class="card-title">⚠ '+c.label+' 잠재 이탈 가능자 ('+c.ids.length+'명)</div>'
+    +'<div style="font-size:11px;color:var(--muted);margin-bottom:8px;">소통불가 제외 인원 중 프로파일링(서베이) 미제출자예요.</div>'
+    +'<div style="max-height:60vh;overflow-y:auto;">'+c.ids.slice().sort(function(a,b){ return ((people[a].branch||'')+(people[a].name||'')).localeCompare((people[b].branch||'')+(people[b].name||'')); }).map(function(id){
+      var p=people[id], sent=lastSurveyLinkSentDate(id);
+      return '<div class="row-clickable" style="padding:8px 4px;border-bottom:1px solid var(--bd);cursor:pointer;display:flex;justify-content:space-between;" onclick="this.closest(\'.modal-overlay\').remove();openProfile(\''+id+'\')">'
+        +'<span><b>'+(p.name||'-')+'</b> <span style="color:var(--muted);font-size:12px;">'+(p.hq||'')+' · '+(p.branch||'')+'</span></span>'
+        +'<span style="font-size:11px;color:var(--muted);">'+(sent?sent+' 발송':'미발송')+'</span></div>';
+    }).join('')+'</div>';
+  overlay.appendChild(box); document.body.appendChild(overlay);
 }
 function showSurveyPending(){
   var excludedIds = Object.keys(people).filter(function(id){ var p=people[id]; return p.terminated || p.terminationCandidate; });
@@ -2943,19 +3047,19 @@ function renderGrid9(ids, viewYm){
   var officialIdMatrix = [[[],[],[]],[[],[],[]],[[],[],[]]];
   var rowIdx = {'1':0,'2':1,'3':2}; // 실적: 1(상)=위, 3(하)=아래
   var colIdx = {C:0,B:1,A:2}; // 역량: C(하)=왼쪽, A(상)=오른쪽
-  var officialUnclassified = 0;
+  var officialUnclassified = 0, officialUnclassifiedSv = 0;
   ids.forEach(function(id){
     var cr = ((src[id]&&src[id].cr)||'').toUpperCase();
     var letter = cr.charAt(0), digit = cr.charAt(1);
     var r = rowIdx[digit], c = colIdx[letter];
-    if(r===undefined || c===undefined){ officialUnclassified++; return; }
+    if(r===undefined || c===undefined){ officialUnclassified++; if(surveyResponses[id] && Object.keys(surveyResponses[id]).length>0) officialUnclassifiedSv++; return; }
     officialMatrix[r][c]++;
     officialIdMatrix[r][c].push(id);
   });
   _grid9Data.official = officialIdMatrix;
   document.getElementById('grid9-official').innerHTML =
     render9x9GridHtml(officialMatrix, ['1(상)','2(중)','3(하)'], ['C(하)','B(중)','A(상)'], total, 'official', officialIdMatrix)
-    + '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">'+(grid9Excluded?'해촉·소통불가 '+grid9Excluded+'명 제외 · ':'')+(officialUnclassified?'C/R 미기재 '+officialUnclassified+'명 제외 · ':'')+'칸 아래 📋 = 그 칸 인원 중 설문 응답자 수 · 응답률</div>';
+    + '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">'+(grid9Excluded?'해촉·소통불가 '+grid9Excluded+'명 제외 · ':'')+(officialUnclassified?'C/R 미기재 '+officialUnclassified+'명 제외(그중 설문 응답 '+officialUnclassifiedSv+'명) · ':'')+'칸 아래 📋 = 그 칸 인원 중 설문 응답자 수 · 응답률</div>';
 
   // 2) eFSR 확장평가 C/R — 행=실적(0=상→위, 2=하→아래), 열=활동역량(0=상이지만 오른쪽에 오도록 2-act로 반전)
   var eqTiers = computeEquityTiers(ids, src, asOfYm);
