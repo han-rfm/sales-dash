@@ -202,7 +202,8 @@ tr.row-clickable:hover{background:var(--sf2);}
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
           <div class="card-title" style="margin:0;">📋 프로파일링 현황</div>
           <span style="display:flex;gap:6px;">
-            <button class="btn" id="survey-org-toggle" style="font-size:11px;padding:5px 10px;" onclick="toggleSurveyOrgBreakdown()">🏢 조직별 보기 ▾</button>
+            <button class="btn" id="survey-org-toggle" style="font-size:11px;padding:5px 10px;" onclick="toggleSurveyOrgBreakdown('all')">🏢 조직별 보기 ▾</button>
+            <button class="btn" id="survey-org-toggle-nonew" style="font-size:11px;padding:5px 10px;" onclick="toggleSurveyOrgBreakdown('nonew')">🌱 신입 제외 조직별 ▾</button>
             <button class="btn" style="font-size:11px;padding:5px 10px;" onclick="showSurveyPending()">미응답자 보기</button>
           </span>
         </div>
@@ -2676,12 +2677,31 @@ function exportSurveyPendingExcel(){
    초록 = 제출(프로파일링 성공), 주황 = 미제출 = '잠재 이탈 가능자'
    본부 행 클릭 → 그 본부 지점별 행 펼침 / 미제출 숫자 클릭 → 명단 */
 var _surveyOrgOpen = false, _surveyOrgOpenHq = {};
-function toggleSurveyOrgBreakdown(){
-  _surveyOrgOpen = !_surveyOrgOpen;
+var _surveyOrgMode = 'all'; // 'all' | 'nonew'(신입 제외)
+// 신입 판단: 날짜가 아니라 '개월'로만 — (이번달 − 위촉월) < NEWBIE_MONTHS 이면 신입
+//   예) 11월 기준 NEWBIE_MONTHS=3 → 9·10·11월 위촉자 = 신입(모수·제출 모두 제외), 8월 위촉부터 포함
+var NEWBIE_MONTHS = 3;
+function isNewbie(p){
+  var j = String((p&&p.joinDate)||'');
+  if(j.length<6) return false; // 위촉일 없으면 신입으로 보지 않음
+  var now = new Date();
+  var diff = (now.getFullYear()*12+now.getMonth()+1) - (Number(j.slice(0,4))*12+Number(j.slice(4,6)));
+  return diff < NEWBIE_MONTHS;
+}
+function newbieCutoffLabel(){
+  var now = new Date(); var d = new Date(now.getFullYear(), now.getMonth()-(NEWBIE_MONTHS-1), 1);
+  return String(d.getFullYear()).slice(2)+'.'+pad2(d.getMonth()+1);
+}
+function toggleSurveyOrgBreakdown(mode){
+  mode = mode||'all';
+  // 같은 버튼 다시 누르면 닫힘, 다른 버튼 누르면 그 모드로 전환
+  if(_surveyOrgOpen && _surveyOrgMode===mode) _surveyOrgOpen = false;
+  else { _surveyOrgOpen = true; _surveyOrgMode = mode; }
   var el = document.getElementById('survey-org-breakdown');
-  var btn = document.getElementById('survey-org-toggle');
   if(el) el.style.display = _surveyOrgOpen ? 'block' : 'none';
-  if(btn) btn.textContent = _surveyOrgOpen ? '🏢 조직별 보기 ▴' : '🏢 조직별 보기 ▾';
+  var b1 = document.getElementById('survey-org-toggle'), b2 = document.getElementById('survey-org-toggle-nonew');
+  if(b1){ var on1 = _surveyOrgOpen && _surveyOrgMode==='all'; b1.textContent = '🏢 조직별 보기 '+(on1?'▴':'▾'); b1.classList.toggle('primary', on1); }
+  if(b2){ var on2 = _surveyOrgOpen && _surveyOrgMode==='nonew'; b2.textContent = '🌱 신입 제외 조직별 '+(on2?'▴':'▾'); b2.classList.toggle('primary', on2); }
   if(_surveyOrgOpen) renderSurveyOrgBreakdown();
 }
 function toggleSurveyOrgHq(hq){
@@ -2689,7 +2709,7 @@ function toggleSurveyOrgHq(hq){
   renderSurveyOrgBreakdown();
 }
 function _surveyOrgStats(filterFn){
-  var roster = Object.keys(people).filter(function(id){ var p=people[id]; return !p.terminated && filterFn(p); });
+  var roster = Object.keys(people).filter(function(id){ var p=people[id]; return !p.terminated && filterFn(p) && !(_surveyOrgMode==='nonew' && isNewbie(p)); });
   var managed = roster.filter(function(id){ return !people[id].terminationCandidate; });
   var done = managed.filter(function(id){ return surveyResponses[id] && Object.keys(surveyResponses[id]).length>0; });
   return { roster:roster.length, incommunicado:roster.length-managed.length, managed:managed.length, done:done.length,
@@ -2746,6 +2766,11 @@ function renderSurveyOrgBreakdown(){
   var html = '<div style="font-size:11px;color:var(--muted);margin-bottom:6px;">기준(100%) = 재적 − 소통불가 · <span style="color:var(--good);font-weight:700;">초록 = 프로파일링 성공</span> · <span style="color:#c06a00;font-weight:700;">주황 = 미제출(잠재 이탈 가능자)</span> · 막대 길이 = 전체 기준인원 대비 그 조직 인원 비율(모든 조직 같은 자) · 본부를 누르면 지점별로 펼쳐져요</div>';
   var allSt = _surveyOrgStats(function(){ return true; });
   _surveyOrgScaleBase = allSt.managed;
+  if(_surveyOrgMode==='nonew'){
+    var nb = Object.keys(people).filter(function(id){ var p=people[id]; return !p.terminated && !p.terminationCandidate && isNewbie(p); });
+    var nbDone = nb.filter(function(id){ return surveyResponses[id] && Object.keys(surveyResponses[id]).length>0; }).length;
+    html += '<div style="font-size:11.5px;background:#eefaf3;border:1px solid #bfe6cf;color:#0b6e48;border-radius:8px;padding:7px 10px;margin-bottom:8px;">🌱 <b>신입 제외 보기</b> — '+newbieCutoffLabel()+' 이후 위촉('+NEWBIE_MONTHS+'개월 미만) <b>'+nb.length+'명</b>을 모수에서 빼고, 그중 제출자 '+nbDone+'명도 제출에서 뺐어요.</div>';
+  }
   html += _surveyOrgRowHtml('전체', allSt, {bold:true});
   var hqRows = hqs.map(function(hq){
     var st = _surveyOrgStats(function(p){ return (p.hq||'미분류')===hq; });
