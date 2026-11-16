@@ -210,8 +210,8 @@ tr.row-clickable:hover{background:var(--sf2);}
           <span id="survey-rate-pct-total" style="position:absolute;top:50%;transform:translate(-100%,-50%);font-size:10.5px;font-weight:700;color:#fff;padding-right:6px;white-space:nowrap;"></span>
         </div>
         <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:10.5px;color:var(--muted);margin-top:6px;">
-          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:linear-gradient(90deg,var(--accent),var(--good));vertical-align:middle;margin-right:4px;"></span>전체 기준</span>
-          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:repeating-linear-gradient(45deg,#a8d8c0 0 3px,#c7e8d8 3px 6px);vertical-align:middle;margin-right:4px;"></span>해촉·소통불가 제외 기준</span>
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:linear-gradient(90deg,var(--accent),var(--good));vertical-align:middle;margin-right:4px;"></span>재적 기준</span>
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:repeating-linear-gradient(45deg,#a8d8c0 0 3px,#c7e8d8 3px 6px);vertical-align:middle;margin-right:4px;"></span>소통불가 제외 기준</span>
         </div>
         <div style="font-size:12px;color:var(--muted);margin-top:6px;" id="survey-rate-label">-</div>
         <div style="font-size:11px;color:var(--accent);margin-top:2px;" id="survey-rate-label-active">-</div>
@@ -2448,12 +2448,14 @@ function renderMergedProductUnderstandingHtml(){
 }
 var HQ_METRIC_LABELS = { avgCount:'건수', avgMip:'MIP', avgSp:'SP', perMip:'건당MIP', perSp:'건당SP' };
 function renderSurveyRate(ids){
+  // '전체 기준' 분모 = 현재 재적(해촉자 제외). 상단 '전체 인원' 카드와 같은 기준 (2026-11 변경, 이전엔 해촉자 포함 등록인원 기준)
+  ids = ids.filter(function(id){ return people[id] && !people[id].terminated; });
   var respondedIds = ids.filter(function(id){ return surveyResponses[id] && Object.keys(surveyResponses[id]).length>0; });
   var pct = ids.length ? Math.round(respondedIds.length/ids.length*100) : 0;
   var fillEl = document.getElementById('survey-rate-fill');
   var labelEl = document.getElementById('survey-rate-label');
   if(fillEl) fillEl.style.width = pct+'%';
-  if(labelEl) labelEl.textContent = respondedIds.length+' / '+ids.length+'명 제출 ('+pct+'%)';
+  if(labelEl) labelEl.textContent = '재적 기준: '+respondedIds.length+' / '+ids.length+'명 제출 ('+pct+'%)';
   // 해촉·소통불가자 뺀 "활성 인원" 기준 수치도 같이 표기 (요청 반영, 2026-08)
   var activeIds = ids.filter(function(id){ var p=people[id]; return p && !p.terminated && !p.terminationCandidate; });
   var activeResponded = activeIds.filter(function(id){ return surveyResponses[id] && Object.keys(surveyResponses[id]).length>0; });
@@ -2462,7 +2464,7 @@ function renderSurveyRate(ids){
   if(labelActiveEl){
     var excluded = ids.length - activeIds.length;
     labelActiveEl.textContent = excluded>0
-      ? '↳ 해촉·소통불가 '+excluded+'명 제외 기준: '+activeResponded.length+' / '+activeIds.length+'명 ('+activePct+'%)'
+      ? '↳ 소통불가 '+excluded+'명 제외 기준: '+activeResponded.length+' / '+activeIds.length+'명 ('+activePct+'%)'
       : '';
   }
   // 막대 중첩: 아래(빗금)=해촉·소통불가 제외 기준, 위(그라데이션)=전체 기준
@@ -2478,7 +2480,7 @@ function renderSurveyRate(ids){
   // 두 값이 너무 붙어있으면(6%p 이내) 겹쳐 보여서 빗금쪽 라벨은 숨김
   if(activePct-pct>=6) placePct('survey-rate-pct-active', activePct);
   else { var a=document.getElementById('survey-rate-pct-active'); if(a) a.textContent=''; }
-  renderPhotoUploadRate(ids);
+  renderPhotoUploadRate(); // 사진 현황은 자체 기준(전체 등록인원 중 활성)으로 계산
 }
 // 방문 인증샷 업로드 현황 — 사진 1장 이상 올린 인원 기준 (분모: 해촉·소통불가 제외 활성 인원)
 function renderPhotoUploadRate(ids){
