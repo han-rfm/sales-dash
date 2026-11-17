@@ -394,6 +394,7 @@ tr.row-clickable:hover{background:var(--sf2);}
         <button class="btn" onclick="exportOrgListExcel()">📥 엑셀 다운로드</button>
         <button class="btn" onclick="openMgrReachModal()">👔 MGR Reach</button>
         <button class="btn" onclick="openRollingPaperViewer()">💌 롤링페이퍼 보기</button>
+        <button class="btn" onclick="openOrgChartModal()">🏢 조직 계층도</button>
         <button class="btn" onclick="openManualPersonModal()">➕ 신규 등록</button>
         <button class="btn primary" onclick="openOrgReachModal()">🚀 Reach</button>
       </div>
@@ -6667,6 +6668,89 @@ function deleteUploadSnapshot(ym){
 }
 
 /* ---------- SETTINGS: ORG MAP ---------- */
+/* ---------- 조직 계층도 (rFM → 본부(본부장=설정의 담당 MD) → 지점(지점장=설정의 담당 AM)) ----------
+   SVG로 그려서 화면 표시 + PNG 다운로드(PPT용). 인원 = 재적(해촉 제외) / 실관리(소통불가 제외) */
+function buildOrgChartSvg(){
+  var tree = {};
+  Object.keys(people).forEach(function(id){
+    var p = people[id]; if(!p.hq || p.terminated) return;
+    var h = tree[p.hq] = tree[p.hq] || { roster:0, managed:0, br:{} };
+    var b = h.br[p.branch||'미분류'] = h.br[p.branch||'미분류'] || { roster:0, managed:0 };
+    h.roster++; b.roster++;
+    if(!p.terminationCandidate){ h.managed++; b.managed++; }
+  });
+  var hqs = Object.keys(tree).sort(function(a,b){ return tree[b].roster-tree[a].roster || a.localeCompare(b); });
+  if(!hqs.length) return null;
+  var cmap = getHqColorMap();
+  var BW=168, HQH=66, BRH=46, GAPX=18, GAPY=10, TOP=28, ROOTH=60, LV1=ROOTH+TOP+46, PAD=24;
+  var maxBr = Math.max.apply(null, hqs.map(function(h){ return Object.keys(tree[h].br).length; }));
+  var W = PAD*2 + hqs.length*BW + (hqs.length-1)*GAPX;
+  var H = LV1 + HQH + 26 + maxBr*(BRH+GAPY) + PAD + 18;
+  function esc(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  var F = "font-family:'Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;";
+  var totalR=0, totalM=0; hqs.forEach(function(h){ totalR+=tree[h].roster; totalM+=tree[h].managed; });
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'
+    +'<rect width="100%" height="100%" fill="#ffffff"/>';
+  // root
+  var rx = W/2-130, ry = TOP;
+  svg += '<rect x="'+rx+'" y="'+ry+'" width="260" height="'+ROOTH+'" rx="12" fill="#1f2a44"/>'
+    +'<text x="'+(W/2)+'" y="'+(ry+25)+'" text-anchor="middle" style="'+F+'font-size:16px;font-weight:800;fill:#fff;">CA TIP Team · rFM 한정훈</text>'
+    +'<text x="'+(W/2)+'" y="'+(ry+46)+'" text-anchor="middle" style="'+F+'font-size:11.5px;fill:#c9d3ea;">'+hqs.length+'개 본부 · 재적 '+totalR+'명 · 실관리 '+totalM+'명</text>';
+  // root → hq bus line
+  var busY = LV1-22;
+  var firstCx = PAD+BW/2, lastCx = PAD+(hqs.length-1)*(BW+GAPX)+BW/2;
+  svg += '<path d="M'+(W/2)+' '+(ry+ROOTH)+' V'+busY+' M'+firstCx+' '+busY+' H'+lastCx+'" stroke="#9aa3b5" stroke-width="1.5" fill="none"/>';
+  hqs.forEach(function(hq,i){
+    var x = PAD + i*(BW+GAPX), cx = x+BW/2, col = cmap[hq]||'#4361ee', t = tree[hq];
+    var md = omName(orgMap.hq[hq]);
+    svg += '<path d="M'+cx+' '+busY+' V'+LV1+'" stroke="#9aa3b5" stroke-width="1.5"/>'
+      +'<rect x="'+x+'" y="'+LV1+'" width="'+BW+'" height="'+HQH+'" rx="10" fill="'+col+'"/>'
+      +'<text x="'+cx+'" y="'+(LV1+22)+'" text-anchor="middle" style="'+F+'font-size:15px;font-weight:800;fill:#fff;">'+esc(hq)+'</text>'
+      +'<text x="'+cx+'" y="'+(LV1+40)+'" text-anchor="middle" style="'+F+'font-size:11.5px;fill:#fff;">본부장 '+esc(md||'(미입력)')+'</text>'
+      +'<text x="'+cx+'" y="'+(LV1+56)+'" text-anchor="middle" style="'+F+'font-size:10.5px;fill:#ffffffcc;">재적 '+t.roster+' · 실관리 '+t.managed+'</text>';
+    var brs = Object.keys(t.br).sort(function(a,b){ return t.br[b].roster-t.br[a].roster || a.localeCompare(b); });
+    var spineX = x+12, y0 = LV1+HQH;
+    if(brs.length) svg += '<path d="M'+spineX+' '+y0+' V'+(y0+18+(brs.length-1)*(BRH+GAPY)+BRH/2)+'" stroke="'+col+'" stroke-width="1.5" fill="none" opacity=".6"/>';
+    brs.forEach(function(b,j){
+      var by = y0+18+j*(BRH+GAPY), bx = x+24, bw = BW-24, bt = t.br[b];
+      var am = omName(orgMap.branch[b]);
+      svg += '<path d="M'+spineX+' '+(by+BRH/2)+' H'+bx+'" stroke="'+col+'" stroke-width="1.5" opacity=".6"/>'
+        +'<rect x="'+bx+'" y="'+by+'" width="'+bw+'" height="'+BRH+'" rx="8" fill="#ffffff" stroke="'+col+'" stroke-width="1.5"/>'
+        +'<rect x="'+bx+'" y="'+by+'" width="5" height="'+BRH+'" rx="2" fill="'+col+'"/>'
+        +'<text x="'+(bx+12)+'" y="'+(by+18)+'" style="'+F+'font-size:12.5px;font-weight:800;fill:#1a1a1a;">'+esc(b)+'</text>'
+        +'<text x="'+(bx+bw-8)+'" y="'+(by+18)+'" text-anchor="end" style="'+F+'font-size:10.5px;fill:#6b7280;">'+bt.roster+'명</text>'
+        +'<text x="'+(bx+12)+'" y="'+(by+35)+'" style="'+F+'font-size:11px;fill:#4b5563;">지점장 '+esc(am||'(미입력)')+'</text>';
+    });
+  });
+  svg += '<text x="'+(W-PAD)+'" y="'+(H-10)+'" text-anchor="end" style="'+F+'font-size:10px;fill:#9aa3b5;">기준일 '+localDateStr(new Date()).replace(/-/g,'.')+' · 재적 = 해촉 제외 · 실관리 = 재적 − 소통불가 · 지점 옆 숫자 = 재적</text>';
+  svg += '</svg>';
+  return { svg:svg, w:W, h:H };
+}
+function openOrgChartModal(){
+  var r = buildOrgChartSvg();
+  if(!r){ showToast('본부 정보가 있는 인원이 없어요.'); return; }
+  var overlay=document.createElement('div'); overlay.className='modal-overlay';
+  overlay.onclick=function(e){ if(e.target===overlay) overlay.remove(); };
+  var box=document.createElement('div'); box.className='modal-box'; box.style.position='relative'; box.style.maxWidth='96vw'; box.style.width='auto';
+  var missing = Object.keys(people).some(function(id){ var p=people[id]; return p.hq && !p.terminated && (!omName(orgMap.hq[p.hq]) || !omName(orgMap.branch[p.branch])); });
+  box.innerHTML = '<button class="modal-close" onclick="this.closest(\'.modal-overlay\').remove()">✕</button>'
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;padding-right:36px;"><div class="card-title" style="margin:0;">🏢 조직 계층도</div>'
+    +'<button class="btn primary" style="font-size:11.5px;padding:5px 10px;" onclick="downloadOrgChartPng()">🖼 PNG 다운로드 (PPT용)</button></div>'
+    +(missing?'<div style="font-size:11px;color:#c06a00;margin-bottom:6px;">"(미입력)"으로 보이는 본부장·지점장은 설정 탭 → 조직 담당자(담당 MD = 본부장, 담당 AM = 지점장)에서 입력하면 바로 반영돼요.</div>':'')
+    +'<div style="overflow:auto;max-height:76vh;border:1px solid var(--bd);border-radius:8px;">'+r.svg+'</div>';
+  overlay.appendChild(box); document.body.appendChild(overlay);
+}
+function downloadOrgChartPng(){
+  var r = buildOrgChartSvg(); if(!r) return;
+  var scale = 2;
+  var img = new Image();
+  img.onload = function(){
+    var c = document.createElement('canvas'); c.width = r.w*scale; c.height = r.h*scale;
+    var ctx = c.getContext('2d'); ctx.scale(scale,scale); ctx.drawImage(img,0,0);
+    var a = document.createElement('a'); a.download = '조직계층도_'+localDateStr(new Date()).replace(/-/g,'')+'.png'; a.href = c.toDataURL('image/png'); a.click();
+  };
+  img.src = 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(r.svg);
+}
 function omName(entry){ if(!entry) return ''; return typeof entry==='string' ? entry : (entry.name||''); }
 function omPhone(entry){ if(!entry || typeof entry==='string') return ''; return entry.phone||''; }
 function fmContactHtml(fm){
